@@ -27,6 +27,16 @@ const Data = (() => {
       GARES = savedGares;
       ELEMENTS = savedElements;
       yRatio = Store.getJSON('eic_yratio', 0.1964);
+      // Nettoyer les identifiants pollués par des coordonnées [x,y]
+      let cleaned = 0;
+      ELEMENTS.forEach(e => {
+        const clean = (e.identifiant || '').replace(/\s*\[[\d\.,]+\]\s*/g, '').trim();
+        if (clean !== e.identifiant) { e.identifiant = clean; cleaned++; }
+      });
+      if (cleaned > 0) {
+        Store.set('eic_elements', ELEMENTS);
+        console.log(`Nettoyage: ${cleaned} identifiants corrigés`);
+      }
       console.log(`Données Supabase: ${GARES.length} gares, ${ELEMENTS.length} éléments`);
     } else {
       // Première utilisation → importer depuis le JSON du PDF
@@ -99,7 +109,7 @@ const Data = (() => {
       ELEMENTS.push({
         id: id,
         type: e.type,
-        identifiant: e.identifiant,
+        identifiant: (e.identifiant || '').replace(/\s*\[[\d\.,]+\]\s*/g, '').trim(),
         gare_id: null, // sera associé par proximité
         ligne: '',
         pk: '',
