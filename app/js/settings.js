@@ -1178,129 +1178,146 @@ const Settings = (() => {
     const layout = getLayout();
     if (!layout.tables) return;
 
+    // Collecter toutes les lignes uniques (dédoublonnées par nom)
+    const seenNames = new Map(); // nom normalisé → line object (premier trouvé)
+    const uniqueLines = [];
     layout.tables.forEach(table => {
-      const groupHeader = document.createElement('div');
-      groupHeader.className = 'settings-group-header';
-      groupHeader.innerHTML = `<span>${table.nom}</span>`;
+      (table.lines || []).forEach(line => {
+        const key = line.nom.toLowerCase().trim();
+        if (!seenNames.has(key)) {
+          seenNames.set(key, line);
+          uniqueLines.push(line);
+        }
+      });
+    });
 
-      const addLineBtn = document.createElement('button');
-      addLineBtn.className = 'zone-item-btn';
-      addLineBtn.textContent = '+';
-      addLineBtn.title = 'Ajouter une ligne';
-      addLineBtn.addEventListener('click', () => {
-        const n = prompt('Nom de la nouvelle ligne :');
-        if (!n || !n.trim()) return;
-        const freshLayout = getLayout();
-        const t = freshLayout.tables.find(t2 => t2.id === table.id);
-        if (t) {
-          t.lines.push({ id: 'line-' + Date.now(), nom: n.trim(), zoneIds: [] });
+    // Trier par nom
+    uniqueLines.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+
+    const dessertes = getAllDessertes();
+
+    uniqueLines.forEach(line => {
+      const dessertesInLine = (line.zoneIds || []).map(id => dessertes.find(d => d.id === id)).filter(Boolean);
+
+      const item = document.createElement('div');
+      item.className = 'settings-item';
+      item.style.flexWrap = 'wrap';
+
+      const name = document.createElement('span');
+      name.className = 'settings-item-name';
+      name.textContent = line.nom;
+      item.appendChild(name);
+
+      const meta = document.createElement('span');
+      meta.className = 'settings-item-meta';
+      meta.textContent = dessertesInLine.length + ' desserte' + (dessertesInLine.length > 1 ? 's' : '');
+      item.appendChild(meta);
+
+      // Actions
+      const actions = document.createElement('span');
+      actions.className = 'settings-item-actions';
+
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'zone-item-btn';
+      renameBtn.textContent = '✎';
+      renameBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const n = prompt('Nom de la ligne :', line.nom);
+        if (n && n.trim()) {
+          const freshLayout = getLayout();
+          // Renommer toutes les occurrences de cette ligne dans toutes les tables
+          freshLayout.tables.forEach(t => (t.lines || []).forEach(l => {
+            if (l.id === line.id) l.nom = n.trim();
+          }));
           saveLayoutObj(freshLayout);
           renderTab('lignes');
         }
       });
-      groupHeader.appendChild(addLineBtn);
-      container.appendChild(groupHeader);
+      actions.appendChild(renameBtn);
 
-      (table.lines || []).forEach(line => {
-        const dessertes = getAllDessertes();
-        const dessertesInLine = (line.zoneIds || []).map(id => dessertes.find(d => d.id === id)).filter(Boolean);
+      const addDesserteBtn = document.createElement('button');
+      addDesserteBtn.className = 'zone-item-btn';
+      addDesserteBtn.textContent = '+';
+      addDesserteBtn.title = 'Ajouter / retirer des dessertes';
+      addDesserteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showDesserteCheckboxModal(null, line);
+      });
+      actions.appendChild(addDesserteBtn);
 
-        const item = document.createElement('div');
-        item.className = 'settings-item';
-        item.style.flexWrap = 'wrap';
+      const delBtn = document.createElement('button');
+      delBtn.className = 'zone-item-btn delete';
+      delBtn.textContent = '✕';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm(`Supprimer la ligne "${line.nom}" ?`)) return;
+        const freshLayout = getLayout();
+        // Supprimer cette ligne de toutes les tables
+        freshLayout.tables.forEach(t => {
+          t.lines = (t.lines || []).filter(l => l.id !== line.id);
+        });
+        saveLayoutObj(freshLayout);
+        renderTab('lignes');
+      });
+      actions.appendChild(delBtn);
 
-        const name = document.createElement('span');
-        name.className = 'settings-item-name';
-        name.textContent = line.nom;
-        item.appendChild(name);
+      item.appendChild(actions);
 
-        const meta = document.createElement('span');
-        meta.className = 'settings-item-meta';
-        meta.textContent = dessertesInLine.length + ' desserte' + (dessertesInLine.length > 1 ? 's' : '');
-        item.appendChild(meta);
+      // Liste des dessertes dans cette ligne (sous l'item)
+      if (dessertesInLine.length > 0) {
+        const chips = document.createElement('div');
+        chips.style.cssText = 'width:100%;display:flex;flex-wrap:wrap;gap:2px;margin-top:3px;padding-left:4px;';
+        dessertesInLine.forEach(d => {
+          const chip = document.createElement('span');
+          chip.style.cssText = 'padding:1px 5px;font-size:8px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:2px;color:var(--muted);display:inline-flex;align-items:center;gap:3px;';
+          chip.textContent = d.nom;
 
-        // Actions
-        const actions = document.createElement('span');
-        actions.className = 'settings-item-actions';
-
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'zone-item-btn';
-        renameBtn.textContent = '✎';
-        renameBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const n = prompt('Nom de la ligne :', line.nom);
-          if (n && n.trim()) {
+          const removeBtn = document.createElement('span');
+          removeBtn.textContent = '✕';
+          removeBtn.title = 'Retirer de cette ligne';
+          removeBtn.style.cssText = 'cursor:pointer;font-size:7px;color:var(--muted);';
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const freshLayout = getLayout();
             freshLayout.tables.forEach(t => (t.lines || []).forEach(l => {
-              if (l.id === line.id) l.nom = n.trim();
+              if (l.id === line.id) {
+                l.zoneIds = (l.zoneIds || []).filter(id => id !== d.id);
+              }
             }));
             saveLayoutObj(freshLayout);
             renderTab('lignes');
-          }
-        });
-        actions.appendChild(renameBtn);
-
-        const addDesserteBtn = document.createElement('button');
-        addDesserteBtn.className = 'zone-item-btn';
-        addDesserteBtn.textContent = '+';
-        addDesserteBtn.title = 'Ajouter / retirer des dessertes';
-        addDesserteBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          showDesserteCheckboxModal(table.id, line);
-        });
-        actions.appendChild(addDesserteBtn);
-
-        const delBtn = document.createElement('button');
-        delBtn.className = 'zone-item-btn delete';
-        delBtn.textContent = '✕';
-        delBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (!confirm(`Supprimer la ligne "${line.nom}" ?`)) return;
-          const freshLayout = getLayout();
-          const t = freshLayout.tables.find(t2 => t2.id === table.id);
-          if (t) {
-            t.lines = t.lines.filter(l => l.id !== line.id);
-            saveLayoutObj(freshLayout);
-            renderTab('lignes');
-          }
-        });
-        actions.appendChild(delBtn);
-
-        item.appendChild(actions);
-
-        // Liste des dessertes dans cette ligne (sous l'item)
-        if (dessertesInLine.length > 0) {
-          const chips = document.createElement('div');
-          chips.style.cssText = 'width:100%;display:flex;flex-wrap:wrap;gap:2px;margin-top:3px;padding-left:4px;';
-          dessertesInLine.forEach(d => {
-            const chip = document.createElement('span');
-            chip.style.cssText = 'padding:1px 5px;font-size:8px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:2px;color:var(--muted);display:inline-flex;align-items:center;gap:3px;';
-            chip.textContent = d.nom;
-
-            const removeBtn = document.createElement('span');
-            removeBtn.textContent = '✕';
-            removeBtn.title = 'Retirer de cette ligne (la desserte n\'est pas supprimée)';
-            removeBtn.style.cssText = 'cursor:pointer;font-size:7px;color:var(--muted);';
-            removeBtn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              const freshLayout = getLayout();
-              freshLayout.tables.forEach(t => (t.lines || []).forEach(l => {
-                if (l.id === line.id) {
-                  l.zoneIds = (l.zoneIds || []).filter(id => id !== d.id);
-                }
-              }));
-              saveLayoutObj(freshLayout);
-              renderTab('lignes');
-            });
-            chip.appendChild(removeBtn);
-            chips.appendChild(chip);
           });
-          item.appendChild(chips);
-        }
+          chip.appendChild(removeBtn);
+          chips.appendChild(chip);
+        });
+        item.appendChild(chips);
+      }
 
-        container.appendChild(item);
-      });
+      container.appendChild(item);
     });
+
+    // Bouton ajouter une ligne
+    const addBtn = document.createElement('button');
+    addBtn.className = 'settings-add-btn';
+    addBtn.textContent = '+ Créer une ligne';
+    addBtn.addEventListener('click', () => {
+      const n = prompt('Nom de la nouvelle ligne :');
+      if (!n || !n.trim()) return;
+      // Vérifier que le nom n'existe pas déjà
+      const key = n.trim().toLowerCase();
+      if (seenNames.has(key)) {
+        alert('Cette ligne existe déjà.');
+        return;
+      }
+      // Ajouter dans la première table
+      const freshLayout = getLayout();
+      if (freshLayout.tables && freshLayout.tables.length > 0) {
+        freshLayout.tables[0].lines.push({ id: 'line-' + Date.now(), nom: n.trim(), zoneIds: [] });
+        saveLayoutObj(freshLayout);
+        renderTab('lignes');
+      }
+    });
+    container.appendChild(addBtn);
   }
 
   // =========================================
