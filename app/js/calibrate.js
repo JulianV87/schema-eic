@@ -15,6 +15,9 @@ const Calibrate = (() => {
       btn.classList.toggle('active', active);
 
       if (active) {
+        // Désactiver tout outil d'annotation actif
+        if (Annotations.setActiveTool) Annotations.setActiveTool(null);
+        if (typeof MagicWand !== 'undefined' && MagicWand.setActive) MagicWand.setActive(false);
         document.getElementById('osd-viewer').style.cursor = 'crosshair';
         showStatusMsg('Mode calibration — cliquez sur un élément du schéma pour l\'identifier');
         enableCalibrationClick();
@@ -60,11 +63,13 @@ const Calibrate = (() => {
 
   function enableCalibrationClick() {
     const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
     viewer.addHandler('canvas-click', onCalibrationClick);
   }
 
   function disableCalibrationClick() {
     const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
     viewer.removeHandler('canvas-click', onCalibrationClick);
   }
 
@@ -204,7 +209,7 @@ const Calibrate = (() => {
     Data.saveManualElement(element);
 
     // Sauvegarder la vue pour cet élément (si elle n'existe pas encore)
-    if (!Viewer.getSavedZoneView || !Data.hasSavedView(id)) {
+    if (!Data.hasSavedView(id)) {
       Viewer.saveCurrentViewForZone(id);
     }
 
