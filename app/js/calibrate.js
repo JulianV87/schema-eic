@@ -60,7 +60,6 @@ const Calibrate = (() => {
         if (debugOverlay) {
           debugOverlay = false;
           destroyDebugCanvas();
-          hideResizeControls();
           const viewer = Viewer.getMainViewer();
           if (viewer) {
             viewer.removeHandler('animation', redrawDebugOverlay);
@@ -684,21 +683,23 @@ const Calibrate = (() => {
 
   // === VISUALISATION DEBUG DES ZONES ===
 
+  let dragHandle = null;   // 'n','s','e','w','ne','nw','se','sw' ou null
+  let dragOrigin = null;   // { x, y } viewport au début du drag
+  let dragOrigBounds = null; // bounds au début du drag
+  const HANDLE_SIZE = 6;
+
   function toggleDebugOverlay() {
     debugOverlay = !debugOverlay;
     if (debugOverlay) {
       createDebugCanvas();
       redrawDebugOverlay();
-      // Re-dessiner à chaque mouvement du viewport
       const viewer = Viewer.getMainViewer();
       if (viewer) {
         viewer.addHandler('animation', redrawDebugOverlay);
         viewer.addHandler('resize', resizeDebugCanvas);
       }
-      showResizeControls();
     } else {
       destroyDebugCanvas();
-      hideResizeControls();
       const viewer = Viewer.getMainViewer();
       if (viewer) {
         viewer.removeHandler('animation', redrawDebugOverlay);
@@ -706,7 +707,6 @@ const Calibrate = (() => {
       }
       selectedElementId = null;
     }
-    // Mettre à jour le bouton
     hideShapePicker();
     showShapePicker();
   }
@@ -716,20 +716,21 @@ const Calibrate = (() => {
     const container = document.getElementById('viewer-container');
     debugCanvas = document.createElement('canvas');
     debugCanvas.id = 'calibrate-debug-canvas';
-    debugCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:11;';
+    debugCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:11;cursor:pointer;';
     debugCanvas.width = container.offsetWidth;
     debugCanvas.height = container.offsetHeight;
     container.appendChild(debugCanvas);
 
-    // Activer les clics sur le debug canvas pour sélectionner
-    debugCanvas.style.pointerEvents = 'auto';
-    debugCanvas.style.cursor = 'pointer';
-    debugCanvas.addEventListener('click', onDebugClick);
+    debugCanvas.addEventListener('mousedown', onDebugMouseDown);
+    debugCanvas.addEventListener('mousemove', onDebugMouseMove);
+    debugCanvas.addEventListener('mouseup', onDebugMouseUp);
   }
 
   function destroyDebugCanvas() {
     if (debugCanvas) {
-      debugCanvas.removeEventListener('click', onDebugClick);
+      debugCanvas.removeEventListener('mousedown', onDebugMouseDown);
+      debugCanvas.removeEventListener('mousemove', onDebugMouseMove);
+      debugCanvas.removeEventListener('mouseup', onDebugMouseUp);
       debugCanvas.remove();
       debugCanvas = null;
     }
@@ -743,6 +744,19 @@ const Calibrate = (() => {
     redrawDebugOverlay();
   }
 
+  function getElementScreenBounds(el) {
+    if (el.shape && el.shape.bounds) {
+      const b = el.shape.bounds;
+      const tl = Viewer.schemaToScreen(b.x, b.y);
+      const br = Viewer.schemaToScreen(b.x + b.w, b.y + b.h);
+      return { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
+    } else {
+      const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
+      const r = 6;
+      return { x: pos.x - r, y: pos.y - r, w: r * 2, h: r * 2 };
+    }
+  }
+
   function redrawDebugOverlay() {
     if (!debugCanvas) return;
     const ctx = debugCanvas.getContext('2d');
@@ -753,63 +767,203 @@ const Calibrate = (() => {
     allElements.forEach(el => {
       const color = TYPE_COLORS[el.type] || TYPE_COLORS.autre;
       const isSelected = el.id === selectedElementId;
-      const alpha = isSelected ? 0.5 : 0.2;
-      const strokeAlpha = isSelected ? 1 : 0.6;
+      const sb = getElementScreenBounds(el);
+
+      // Ne pas dessiner si complètement hors écran
+      if (sb.x + sb.w < 0 || sb.y + sb.h < 0 || sb.x > debugCanvas.width || sb.y > debugCanvas.height) return;
+
+      ctx.save();
 
       if (el.shape && el.shape.bounds) {
-        // Élément avec shape → dessiner les bounds
-        const b = el.shape.bounds;
-        const tl = Viewer.schemaToScreen(b.x, b.y);
-        const br = Viewer.schemaToScreen(b.x + b.w, b.y + b.h);
-        const w = br.x - tl.x;
-        const h = br.y - tl.y;
-
-        if (w < 1 && h < 1) return; // Hors écran ou trop petit
-
-        ctx.save();
+        // Rectangle coloré
         ctx.fillStyle = color;
-        ctx.globalAlpha = alpha;
-        ctx.fillRect(tl.x, tl.y, w, h);
-        ctx.globalAlpha = strokeAlpha;
+        ctx.globalAlpha = isSelected ? 0.4 : 0.15;
+        ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+        ctx.globalAlpha = isSelected ? 1 : 0.5;
         ctx.strokeStyle = color;
         ctx.lineWidth = isSelected ? 2 : 1;
         if (!isSelected) ctx.setLineDash([3, 3]);
-        ctx.strokeRect(tl.x, tl.y, w, h);
+        ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
         ctx.setLineDash([]);
-
-        // Label
-        ctx.globalAlpha = 0.9;
-        ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(el.identifiant || el.id, tl.x + 2, tl.y - 3);
-        ctx.restore();
       } else {
-        // Élément sans shape → dessiner un cercle à sa position
-        const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
-        const r = Math.max(4, 8 * (isSelected ? 1.5 : 1));
-
-        ctx.save();
+        // Cercle pour les éléments sans shape
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(sb.x + sb.w / 2, sb.y + sb.h / 2, 6, 0, Math.PI * 2);
         ctx.fillStyle = color;
-        ctx.globalAlpha = alpha + 0.1;
+        ctx.globalAlpha = isSelected ? 0.5 : 0.25;
         ctx.fill();
-        ctx.globalAlpha = strokeAlpha;
+        ctx.globalAlpha = isSelected ? 1 : 0.6;
         ctx.strokeStyle = color;
         ctx.lineWidth = isSelected ? 2 : 1;
         ctx.stroke();
-
-        // Label
-        ctx.globalAlpha = 0.8;
-        ctx.font = '8px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(el.identifiant || '', pos.x + r + 2, pos.y + 3);
-        ctx.restore();
       }
+
+      // Label
+      ctx.globalAlpha = 0.9;
+      ctx.font = '9px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(el.identifiant || el.id, sb.x + 2, sb.y - 3);
+      ctx.restore();
     });
 
-    // Légende des types en bas à gauche
+    // Poignées de redimensionnement pour l'élément sélectionné
+    if (selectedElementId) {
+      const sel = allElements.find(e => e.id === selectedElementId);
+      if (sel) drawHandles(ctx, sel);
+    }
+
     drawDebugLegend(ctx);
+  }
+
+  function drawHandles(ctx, el) {
+    const sb = getElementScreenBounds(el);
+    const hs = HANDLE_SIZE;
+    const handles = getHandlePositions(sb);
+
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#ff9520';
+    ctx.lineWidth = 1.5;
+
+    Object.values(handles).forEach(h => {
+      ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+      ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+    });
+    ctx.restore();
+  }
+
+  function getHandlePositions(sb) {
+    const cx = sb.x + sb.w / 2;
+    const cy = sb.y + sb.h / 2;
+    return {
+      nw: { x: sb.x, y: sb.y },
+      n:  { x: cx, y: sb.y },
+      ne: { x: sb.x + sb.w, y: sb.y },
+      w:  { x: sb.x, y: cy },
+      e:  { x: sb.x + sb.w, y: cy },
+      sw: { x: sb.x, y: sb.y + sb.h },
+      s:  { x: cx, y: sb.y + sb.h },
+      se: { x: sb.x + sb.w, y: sb.y + sb.h },
+    };
+  }
+
+  function hitTestHandle(mx, my, el) {
+    const sb = getElementScreenBounds(el);
+    const handles = getHandlePositions(sb);
+    const tol = HANDLE_SIZE + 4;
+
+    for (const [name, pos] of Object.entries(handles)) {
+      if (Math.abs(mx - pos.x) < tol && Math.abs(my - pos.y) < tol) {
+        return name;
+      }
+    }
+    return null;
+  }
+
+  function onDebugMouseDown(e) {
+    const rect = debugCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    // Si un élément est sélectionné, tester les poignées
+    if (selectedElementId) {
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel) {
+        const handle = hitTestHandle(mx, my, sel);
+        if (handle) {
+          e.preventDefault();
+          e.stopPropagation();
+          dragHandle = handle;
+          dragOrigin = { x: mx, y: my };
+          // Sauvegarder les bounds d'origine en viewport
+          if (sel.shape && sel.shape.bounds) {
+            dragOrigBounds = { ...sel.shape.bounds };
+          } else {
+            const r = DEFAULT_RADIUS;
+            dragOrigBounds = { x: sel.x_pct - r, y: sel.y_pct - r, w: r * 2, h: r * 2 };
+          }
+          debugCanvas.style.cursor = getHandleCursor(handle);
+          return;
+        }
+      }
+    }
+
+    // Sinon, sélectionner un élément
+    const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(mx, my));
+    const clicked = findNearbyElement(vp.x, vp.y);
+    selectedElementId = clicked ? clicked.id : null;
+    redrawDebugOverlay();
+  }
+
+  function onDebugMouseMove(e) {
+    const rect = debugCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    if (dragHandle && dragOrigBounds) {
+      // Calculer le delta en coordonnées viewport
+      const vpNow = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(mx, my));
+      const vpOrig = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(dragOrigin.x, dragOrigin.y));
+      const dx = vpNow.x - vpOrig.x;
+      const dy = vpNow.y - vpOrig.y;
+
+      const ob = dragOrigBounds;
+      let nb = { ...ob };
+
+      // Modifier les bounds selon la poignée
+      if (dragHandle.includes('w')) { nb.x = ob.x + dx; nb.w = ob.w - dx; }
+      if (dragHandle.includes('e')) { nb.w = ob.w + dx; }
+      if (dragHandle.includes('n')) { nb.y = ob.y + dy; nb.h = ob.h - dy; }
+      if (dragHandle.includes('s')) { nb.h = ob.h + dy; }
+
+      // Empêcher les dimensions négatives
+      if (nb.w < 0.0005) { nb.w = 0.0005; }
+      if (nb.h < 0.0001) { nb.h = 0.0001; }
+
+      // Appliquer temporairement pour le preview
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel) {
+        if (!sel.shape) sel.shape = { type: 'rectangle', bounds: null, contour: null };
+        sel.shape.bounds = nb;
+        redrawDebugOverlay();
+      }
+    } else if (selectedElementId) {
+      // Changer le curseur selon la poignée survolée
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel) {
+        const handle = hitTestHandle(mx, my, sel);
+        debugCanvas.style.cursor = handle ? getHandleCursor(handle) : 'pointer';
+      }
+    }
+  }
+
+  function onDebugMouseUp(e) {
+    if (dragHandle && selectedElementId) {
+      // Sauvegarder les nouvelles bounds
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel && sel.shape && sel.shape.bounds) {
+        // Mettre à jour le centre de l'élément
+        const b = sel.shape.bounds;
+        sel.x_pct = b.x + b.w / 2;
+        sel.y_pct = b.y + b.h / 2;
+        Data.saveManualElement(sel);
+      }
+    }
+    dragHandle = null;
+    dragOrigin = null;
+    dragOrigBounds = null;
+    debugCanvas.style.cursor = 'pointer';
+    redrawDebugOverlay();
+  }
+
+  function getHandleCursor(handle) {
+    const map = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+      nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' };
+    return map[handle] || 'pointer';
   }
 
   function drawDebugLegend(ctx) {
@@ -835,156 +989,6 @@ const Calibrate = (() => {
       ctx.fillText(type, x + 18, ly);
     });
     ctx.restore();
-  }
-
-  function onDebugClick(e) {
-    const rect = debugCanvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-
-    const viewer = Viewer.getMainViewer();
-    if (!viewer) return;
-    const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(cx, cy));
-
-    // Chercher l'élément cliqué
-    const clicked = findNearbyElement(vp.x, vp.y);
-    if (clicked) {
-      selectedElementId = clicked.id;
-      resizeScale = 1.0;
-      updateResizeControls();
-      redrawDebugOverlay();
-    } else {
-      selectedElementId = null;
-      redrawDebugOverlay();
-    }
-  }
-
-  function showResizeControls() {
-    let panel = document.getElementById('debug-resize-panel');
-    if (panel) return;
-
-    const container = document.getElementById('viewer-container');
-    panel = document.createElement('div');
-    panel.id = 'debug-resize-panel';
-    panel.style.cssText = `
-      position:absolute; bottom:8px; right:12px; z-index:30;
-      background:rgba(12,18,32,0.95); border:1px solid #2a4266; border-radius:6px;
-      font-family:'JetBrains Mono',monospace; font-size:10px; color:#c8daf5;
-      padding:8px 12px; display:flex; flex-direction:column; gap:6px; min-width:200px;
-    `;
-
-    panel.innerHTML = `
-      <div style="font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#4a6a9a;">Élément sélectionné</div>
-      <div id="debug-selected-name" style="color:#ff9520;">Aucun</div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span>Zone:</span>
-        <button id="debug-shrink" style="padding:2px 8px;background:#1e304a;border:1px solid #2a4266;border-radius:3px;color:#ff4040;cursor:pointer;font-size:12px;">−</button>
-        <span id="debug-scale-label">100%</span>
-        <button id="debug-grow" style="padding:2px 8px;background:#1e304a;border:1px solid #2a4266;border-radius:3px;color:#00d4a0;cursor:pointer;font-size:12px;">+</button>
-      </div>
-      <button id="debug-apply" style="padding:4px;background:#00d4a0;border:none;border-radius:3px;color:#0c1220;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;">Appliquer</button>
-    `;
-    container.appendChild(panel);
-
-    document.getElementById('debug-shrink').addEventListener('click', () => {
-      resizeScale = Math.max(0.2, resizeScale - 0.1);
-      updateResizeControls();
-      previewResize();
-    });
-    document.getElementById('debug-grow').addEventListener('click', () => {
-      resizeScale = Math.min(3.0, resizeScale + 0.1);
-      updateResizeControls();
-      previewResize();
-    });
-    document.getElementById('debug-apply').addEventListener('click', applyResize);
-  }
-
-  function hideResizeControls() {
-    const panel = document.getElementById('debug-resize-panel');
-    if (panel) panel.remove();
-  }
-
-  function updateResizeControls() {
-    const nameEl = document.getElementById('debug-selected-name');
-    const scaleEl = document.getElementById('debug-scale-label');
-    if (!nameEl || !scaleEl) return;
-
-    if (selectedElementId) {
-      const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
-      nameEl.textContent = el ? (el.identifiant + ' (' + el.type + ')') : selectedElementId;
-      nameEl.style.color = el ? (TYPE_COLORS[el.type] || '#ff9520') : '#ff9520';
-    } else {
-      nameEl.textContent = 'Aucun';
-      nameEl.style.color = '#ff9520';
-    }
-    scaleEl.textContent = Math.round(resizeScale * 100) + '%';
-  }
-
-  function previewResize() {
-    if (!selectedElementId) return;
-    redrawDebugOverlay();
-
-    // Dessiner un aperçu de la nouvelle taille
-    const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
-    if (!el || !debugCanvas) return;
-
-    const ctx = debugCanvas.getContext('2d');
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    ctx.strokeStyle = '#ffdd00';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 4]);
-
-    if (el.shape && el.shape.bounds) {
-      const b = el.shape.bounds;
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      const nw = b.w * resizeScale;
-      const nh = b.h * resizeScale;
-      const tl = Viewer.schemaToScreen(cx - nw / 2, cy - nh / 2);
-      const br = Viewer.schemaToScreen(cx + nw / 2, cy + nh / 2);
-      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-    } else {
-      const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
-      const r = DEFAULT_RADIUS * resizeScale;
-      const tl = Viewer.schemaToScreen(el.x_pct - r, el.y_pct - r);
-      const br = Viewer.schemaToScreen(el.x_pct + r, el.y_pct + r);
-      const w = br.x - tl.x;
-      const h = br.y - tl.y;
-      ctx.strokeRect(tl.x, tl.y, w, h);
-    }
-    ctx.restore();
-  }
-
-  function applyResize() {
-    if (!selectedElementId || resizeScale === 1.0) return;
-
-    const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
-    if (!el) return;
-
-    if (el.shape && el.shape.bounds) {
-      const b = el.shape.bounds;
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      const nw = b.w * resizeScale;
-      const nh = b.h * resizeScale;
-      el.shape.bounds = { x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh };
-    } else {
-      // Créer une shape à partir du point
-      const r = DEFAULT_RADIUS * resizeScale;
-      el.shape = {
-        type: 'rectangle',
-        bounds: { x: el.x_pct - r, y: el.y_pct - r, w: r * 2, h: r * 2 },
-        contour: null,
-      };
-    }
-
-    Data.saveManualElement(el);
-    resizeScale = 1.0;
-    updateResizeControls();
-    redrawDebugOverlay();
-    showStatusMsg(`Zone de ${el.identifiant} redimensionnée`);
-    setTimeout(() => { if (active) showStatusMsg('Mode calibration'); }, 1500);
   }
 
   function showStatusMsg(msg) {
