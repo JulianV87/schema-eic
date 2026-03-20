@@ -918,38 +918,51 @@ const Calibrate = (() => {
     ctx.strokeStyle = '#ff9520';
     ctx.lineWidth = 1.5;
 
-    Object.entries(handles).forEach(([name, h]) => {
-      if (name === 'rotate') {
-        // Ligne de connexion du haut-centre vers la poignée de rotation
-        const topCenter = handles.n;
-        ctx.beginPath();
-        ctx.moveTo(topCenter.x, topCenter.y);
-        ctx.lineTo(h.x, h.y);
-        ctx.strokeStyle = '#ff9520';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        // Cercle de rotation
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, hs, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-        ctx.strokeStyle = '#00d4a0';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Petite fleche indicatrice (arc)
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, hs - 1, -Math.PI * 0.6, Math.PI * 0.2);
-        ctx.strokeStyle = '#00d4a0';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#ff9520';
-        ctx.lineWidth = 1.5;
-        ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
-        ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
-      }
+    // Dessiner les bords comme des barres pour montrer qu'on peut drag indépendamment
+    const edgeLen = 12;
+    ['n', 's'].forEach(name => {
+      const h = handles[name];
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#ff9520';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(h.x - edgeLen, h.y - hs / 2, edgeLen * 2, hs);
+      ctx.strokeRect(h.x - edgeLen, h.y - hs / 2, edgeLen * 2, hs);
     });
+    ['e', 'w'].forEach(name => {
+      const h = handles[name];
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#ff9520';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(h.x - hs / 2, h.y - edgeLen, hs, edgeLen * 2);
+      ctx.strokeRect(h.x - hs / 2, h.y - edgeLen, hs, edgeLen * 2);
+    });
+
+    // Coins carrés
+    ['nw', 'ne', 'sw', 'se'].forEach(name => {
+      const h = handles[name];
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#ff9520';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+      ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+    });
+
+    // Rotation
+    const rh = handles.rotate;
+    const topCenter = handles.n;
+    ctx.beginPath();
+    ctx.moveTo(topCenter.x, topCenter.y);
+    ctx.lineTo(rh.x, rh.y);
+    ctx.strokeStyle = '#00d4a0';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(rh.x, rh.y, hs, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = '#00d4a0';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -972,21 +985,52 @@ const Calibrate = (() => {
   function hitTestHandle(mx, my, el) {
     const sb = getElementScreenBounds(el);
     const handles = getHandlePositions(sb);
-    const tol = HANDLE_SIZE + 4;
+    const tolCorner = HANDLE_SIZE + 4;
+    const tolEdge = HANDLE_SIZE + 8; // tolérance plus grande pour les bords
 
-    // Test rotation handle first (circle, slightly larger tolerance)
+    // 1. Rotation (priorité max)
     const rh = handles.rotate;
     if (rh) {
       const dist = Math.sqrt((mx - rh.x) ** 2 + (my - rh.y) ** 2);
-      if (dist < HANDLE_SIZE + 6) return 'rotate';
+      if (dist < HANDLE_SIZE + 8) return 'rotate';
     }
 
-    for (const [name, pos] of Object.entries(handles)) {
-      if (name === 'rotate') continue;
-      if (Math.abs(mx - pos.x) < tol && Math.abs(my - pos.y) < tol) {
+    // 2. Bords simples (n, s, e, w) — testés EN PREMIER pour qu'ils gagnent sur les coins
+    // Pour les bords, on teste sur toute la longueur du bord, pas juste le point central
+    const edges = {
+      n: { axis: 'h', fixed: sb.y,          range: [sb.x, sb.x + sb.w] },
+      s: { axis: 'h', fixed: sb.y + sb.h,   range: [sb.x, sb.x + sb.w] },
+      w: { axis: 'v', fixed: sb.x,          range: [sb.y, sb.y + sb.h] },
+      e: { axis: 'v', fixed: sb.x + sb.w,   range: [sb.y, sb.y + sb.h] },
+    };
+    for (const [name, edge] of Object.entries(edges)) {
+      if (edge.axis === 'h') {
+        // Bord horizontal : vérifier si le curseur est sur toute la largeur du bord
+        if (Math.abs(my - edge.fixed) < tolEdge && mx >= edge.range[0] - tolCorner && mx <= edge.range[1] + tolCorner) {
+          // Exclure les zones de coin (marges aux extrémités)
+          if (mx > edge.range[0] + tolCorner && mx < edge.range[1] - tolCorner) {
+            return name;
+          }
+        }
+      } else {
+        // Bord vertical
+        if (Math.abs(mx - edge.fixed) < tolEdge && my >= edge.range[0] - tolCorner && my <= edge.range[1] + tolCorner) {
+          if (my > edge.range[0] + tolCorner && my < edge.range[1] - tolCorner) {
+            return name;
+          }
+        }
+      }
+    }
+
+    // 3. Coins (nw, ne, sw, se)
+    const corners = ['nw', 'ne', 'sw', 'se'];
+    for (const name of corners) {
+      const pos = handles[name];
+      if (pos && Math.abs(mx - pos.x) < tolCorner && Math.abs(my - pos.y) < tolCorner) {
         return name;
       }
     }
+
     return null;
   }
 
