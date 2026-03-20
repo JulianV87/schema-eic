@@ -364,7 +364,7 @@ const Search = (() => {
     const allDataZones = new Map();
     Data.getZones().forEach(z => allDataZones.set(z.id, z));
     let overrides = {};
-    try { overrides = JSON.parse(localStorage.getItem('eic_zone_overrides') || '{}'); } catch {}
+    try { overrides = Store.getJSON('eic_zone_overrides', {}); } catch {}
 
     const menu = document.createElement('div');
     menu.id = 'restore-menu';
@@ -524,16 +524,9 @@ const Search = (() => {
   function exportConfig() {
     const config = {};
     CONFIG_KEYS.forEach(key => {
-      const val = localStorage.getItem(key);
+      const val = Store.get(key);
       if (val !== null) config[key] = val;
     });
-    // Aussi les états collapsed des lignes/tables
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('eic_collapsed_') || key.startsWith('eic_line_open_') || key.startsWith('eic_group_collapsed_'))) {
-        config[key] = localStorage.getItem(key);
-      }
-    }
 
     const json = JSON.stringify(config, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -563,12 +556,11 @@ const Search = (() => {
             if (!confirm('Ce fichier ne contient pas de layout. Importer quand même ?')) return;
           }
 
-          Object.entries(config).forEach(([key, val]) => {
-            localStorage.setItem(key, val);
+          const promises = Object.entries(config).map(([key, val]) => {
+            const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+            return Store.set(key, parsed);
           });
-
-          // Recharger
-          location.reload();
+          Promise.all(promises).then(() => location.reload());
         } catch (e) {
           alert('Erreur import : ' + e.message);
         }

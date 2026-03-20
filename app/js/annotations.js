@@ -44,20 +44,20 @@ const Annotations = (() => {
     saveToLocalStorage();
   }
 
-  // Persistance localStorage
+  // Persistance Supabase via Store
   function saveToLocalStorage() {
     try {
-      localStorage.setItem('eic_annotations', JSON.stringify(annotations));
-      localStorage.setItem('eic_nextId', String(nextId));
+      Store.set('eic_annotations', annotations);
+      Store.set('eic_nextId', nextId);
     } catch {}
   }
 
   function loadFromLocalStorage() {
     try {
-      const saved = localStorage.getItem('eic_annotations');
+      const saved = Store.getJSON('eic_annotations', null);
       if (saved) {
-        annotations = JSON.parse(saved);
-        nextId = parseInt(localStorage.getItem('eic_nextId') || '1', 10);
+        annotations = saved;
+        nextId = Store.getJSON('eic_nextId', 1);
         if (isNaN(nextId)) nextId = annotations.reduce((max, a) => Math.max(max, a.id), 0) + 1;
         redraw();
       }
@@ -71,19 +71,19 @@ const Annotations = (() => {
     'train-arrete':     { symbol: '◆', color: '#9060ff', label: 'Arrêté PV' },
   };
 
-  // Annotations personnalisées (chargées depuis localStorage)
+  // Annotations personnalisées (chargées depuis Supabase via Store)
   let customAnnotations = [];
 
   function loadCustomAnnotations() {
     try {
-      const saved = localStorage.getItem('eic_custom_annotations');
-      if (saved) customAnnotations = JSON.parse(saved);
+      const saved = Store.getJSON('eic_custom_annotations', null);
+      if (saved) customAnnotations = saved;
     } catch {}
   }
 
   function saveCustomAnnotations() {
     try {
-      localStorage.setItem('eic_custom_annotations', JSON.stringify(customAnnotations));
+      Store.set('eic_custom_annotations', customAnnotations);
     } catch {}
   }
 

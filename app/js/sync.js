@@ -1,8 +1,9 @@
 /**
- * Store — Supabase comme source principale, localStorage comme cache offline
+ * Store — Supabase comme source UNIQUE
  *
- * Toute lecture va d'abord vers Supabase, fallback localStorage.
- * Toute écriture va vers Supabase, puis cache dans localStorage.
+ * Toute lecture/écriture passe par Supabase.
+ * Un cache mémoire accélère les lectures après le chargement initial.
+ * Plus aucun localStorage.
  */
 const Store = (() => {
 
@@ -10,7 +11,7 @@ const Store = (() => {
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZiY3dzZ3Fyd29seG5xcGFzYmdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NDM5NDgsImV4cCI6MjA4OTUxOTk0OH0.yxadPWsLZwYbpet9wlYfTxW9Halx-XMV56PvorCKwIU';
 
   let online = false;
-  let cache = {}; // cache mémoire de toutes les clés
+  let cache = {}; // cache mémoire — rempli au init depuis Supabase
 
   function headers() {
     return {
@@ -22,16 +23,9 @@ const Store = (() => {
   }
 
   /**
-   * Initialiser : charger tout depuis Supabase → cache mémoire + localStorage
+   * Initialiser : charger TOUT depuis Supabase → cache mémoire
    */
   async function init() {
-    // D'abord charger le cache localStorage (instantané)
-    loadLocalCache();
-
-    // Clés en attente de sync (modifiées localement mais pas encore poussées vers Supabase)
-    const pendingKeys = new Set(JSON.parse(localStorage.getItem('_store_pending') || '[]'));
-
-    // Puis tenter Supabase
     try {
       const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*', {
         headers: headers(),
@@ -42,77 +36,42 @@ const Store = (() => {
         const rows = await resp.json();
 
         if (rows && rows.length > 0) {
-          // Supabase a des données — mais ne PAS écraser les clés pending (local est plus frais)
-          let loaded = 0;
-          let skipped = 0;
           rows.forEach(row => {
-            if (pendingKeys.has(row.key)) {
-              // Cette clé a été modifiée localement et pas encore synchronisée
-              // → garder la version locale (plus récente)
-              skipped++;
-              return;
-            }
-            const val = JSON.stringify(row.value);
-            cache[row.key] = val;
-            localStorage.setItem(row.key, val);
-            loaded++;
+            cache[row.key] = JSON.stringify(row.value);
           });
-          console.log(`Store: ${loaded} clés depuis Supabase, ${skipped} clés locales conservées`);
-
-          // Synchroniser les clés en attente vers Supabase
-          if (pendingKeys.size > 0) {
-            await syncPending();
-          }
+          console.log('Store: ' + rows.length + ' clés chargées depuis Supabase');
         } else {
-          // Supabase vide → pousser le localStorage actuel
-          console.log('Store: base vide, envoi initial...');
-          await pushAllToCloud();
+          console.log('Store: base Supabase vide');
         }
         showStatus('ok');
       } else {
-        console.warn('Store: Supabase HTTP ' + resp.status);
-        showStatus('offline');
+        console.error('Store: Supabase HTTP ' + resp.status);
+        showStatus('error');
       }
     } catch (e) {
-      console.warn('Store: hors-ligne —', e.message);
-      showStatus('offline');
+      console.error('Store: impossible de contacter Supabase —', e.message);
+      showStatus('error');
     }
   }
 
   /**
-   * Charger le localStorage dans le cache mémoire
-   */
-  function loadLocalCache() {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('eic_')) {
-        cache[key] = localStorage.getItem(key);
-      }
-    }
-  }
-
-  /**
-   * LIRE une clé — cache mémoire (déjà synchronisé avec Supabase au init)
+   * LIRE une clé — depuis le cache mémoire (chargé depuis Supabase au init)
    */
   function get(key) {
-    return cache[key] || localStorage.getItem(key) || null;
+    return cache[key] || null;
   }
 
   /**
-   * ÉCRIRE une clé — Supabase d'abord, puis cache + localStorage
+   * ÉCRIRE une clé — Supabase d'abord, puis cache mémoire
    */
   async function set(key, value) {
     const json = typeof value === 'string' ? value : JSON.stringify(value);
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
 
-    // 1. Cache mémoire + localStorage immédiat (pour que l'UI réagisse vite)
+    // 1. Cache mémoire immédiat (pour que l'UI réagisse vite)
     cache[key] = json;
-    localStorage.setItem(key, json);
 
-    // 2. Marquer comme pending AVANT l'envoi Supabase (protège contre fermeture de page)
-    markPending(key);
-
-    // 3. Supabase en background
+    // 2. Écrire vers Supabase
     if (online) {
       try {
         const resp = await fetch(SUPABASE_URL + '/rest/v1/config', {
@@ -120,17 +79,17 @@ const Store = (() => {
           headers: headers(),
           body: JSON.stringify([{ key: key, value: parsed }]),
         });
-        if (resp.ok) {
-          // Écriture réussie → retirer du pending
-          removePending(key);
-        } else {
-          console.error('Store: erreur écriture', key, resp.status);
+        if (!resp.ok) {
+          console.error('Store: erreur écriture Supabase', key, resp.status);
           showStatus('error');
         }
       } catch (e) {
-        console.warn('Store: écriture offline pour', key);
-        showStatus('offline');
+        console.error('Store: écriture échouée pour', key, e.message);
+        showStatus('error');
       }
+    } else {
+      console.warn('Store: hors-ligne, écriture perdue pour', key);
+      showStatus('error');
     }
   }
 
@@ -144,59 +103,33 @@ const Store = (() => {
   }
 
   /**
-   * Marquer une clé comme en attente de sync
+   * Forcer un rafraîchissement complet depuis Supabase
    */
-  function markPending(key) {
-    const pending = JSON.parse(localStorage.getItem('_store_pending') || '[]');
-    if (!pending.includes(key)) {
-      pending.push(key);
-      localStorage.setItem('_store_pending', JSON.stringify(pending));
-    }
-  }
-
-  function removePending(key) {
-    const pending = JSON.parse(localStorage.getItem('_store_pending') || '[]');
-    const idx = pending.indexOf(key);
-    if (idx >= 0) {
-      pending.splice(idx, 1);
-      localStorage.setItem('_store_pending', JSON.stringify(pending));
-    }
-  }
-
-  /**
-   * Synchroniser les clés en attente (quand on retrouve la connexion)
-   */
-  async function syncPending() {
-    const pending = JSON.parse(localStorage.getItem('_store_pending') || '[]');
-    if (pending.length === 0) return;
-
-    const rows = [];
-    pending.forEach(key => {
-      const val = get(key);
-      if (val !== null) {
-        try { rows.push({ key: key, value: JSON.parse(val) }); }
-        catch { rows.push({ key: key, value: val }); }
-      }
-    });
-
+  async function forceRefresh() {
+    showStatus('syncing');
     try {
-      const resp = await fetch(SUPABASE_URL + '/rest/v1/config', {
-        method: 'POST',
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*', {
         headers: headers(),
-        body: JSON.stringify(rows),
       });
       if (resp.ok) {
-        localStorage.setItem('_store_pending', '[]');
-        console.log('Store: ' + rows.length + ' clés en attente synchronisées');
+        online = true;
+        const rows = await resp.json();
+        cache = {};
+        rows.forEach(row => {
+          cache[row.key] = JSON.stringify(row.value);
+        });
+        console.log('Store: rafraîchi — ' + rows.length + ' clés');
         showStatus('ok');
+        return true;
       }
     } catch (e) {
-      console.warn('Store: sync pending échouée');
+      showStatus('error');
     }
+    return false;
   }
 
   /**
-   * Pousser tout le cache vers Supabase
+   * Pousser tout le cache vers Supabase (utile pour migration)
    */
   async function pushAllToCloud() {
     const rows = [];
@@ -226,34 +159,6 @@ const Store = (() => {
   }
 
   /**
-   * Forcer un rafraîchissement complet depuis Supabase
-   */
-  async function forceRefresh() {
-    showStatus('syncing');
-    try {
-      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*', {
-        headers: headers(),
-      });
-      if (resp.ok) {
-        online = true;
-        const rows = await resp.json();
-        rows.forEach(row => {
-          const val = JSON.stringify(row.value);
-          cache[row.key] = val;
-          localStorage.setItem(row.key, val);
-        });
-        showStatus('ok');
-        // Aussi sync les pending
-        await syncPending();
-        return true;
-      }
-    } catch (e) {
-      showStatus('error');
-    }
-    return false;
-  }
-
-  /**
    * Indicateur dans le header
    */
   function showStatus(status) {
@@ -275,11 +180,10 @@ const Store = (() => {
 
     const labels = {
       ok: ['☁', '#00d4a0', 'Connecté à Supabase'],
-      offline: ['☁', '#4a6a9a', 'Hors-ligne — clic pour reconnecter'],
       syncing: ['⟳', '#ff9520', 'Synchronisation...'],
-      error: ['☁', '#ff4040', 'Erreur — clic pour réessayer'],
+      error: ['☁', '#ff4040', 'Erreur Supabase — clic pour réessayer'],
     };
-    const [icon, color, title] = labels[status] || labels.offline;
+    const [icon, color, title] = labels[status] || labels.error;
     el.textContent = icon;
     el.style.color = color;
     el.title = title;
