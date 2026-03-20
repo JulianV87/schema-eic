@@ -1598,11 +1598,56 @@ const Calibrate = (() => {
       });
     });
 
-    if (ligneNames.length > 0) {
-      // Dédoublonner les noms de ligne
-      const unique = [...new Set(ligneNames)];
-      document.getElementById('calibrate-ligne').value = unique.join(', ');
+    const unique = [...new Set(ligneNames)];
+    if (unique.length === 0) return;
+
+    const ligneInput = document.getElementById('calibrate-ligne');
+    if (unique.length === 1) {
+      ligneInput.value = unique[0];
+    } else {
+      // Plusieurs lignes : afficher un sélecteur
+      showLigneSelector(ligneInput, unique);
     }
+  }
+
+  function showLigneSelector(inputEl, lignes) {
+    // Supprimer un éventuel sélecteur existant
+    const old = document.getElementById('ligne-selector-dropdown');
+    if (old) old.remove();
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'ligne-selector-dropdown';
+    dropdown.style.cssText = 'position:absolute;left:0;right:0;background:var(--surface);border:1px solid var(--accent);border-radius:3px;z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-height:150px;overflow-y:auto;';
+
+    lignes.forEach(nom => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--text);cursor:pointer;';
+      item.textContent = nom;
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--surface2)');
+      item.addEventListener('mouseleave', () => item.style.background = 'none');
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        inputEl.value = nom;
+        dropdown.remove();
+      });
+      dropdown.appendChild(item);
+    });
+
+    // Positionner sous l'input
+    const parent = inputEl.parentElement;
+    if (parent) {
+      parent.style.position = 'relative';
+      parent.appendChild(dropdown);
+    }
+
+    // Fermer si on clique ailleurs
+    const closeHandler = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== inputEl) {
+        dropdown.remove();
+        document.removeEventListener('mousedown', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 50);
   }
 
   // === PRÉ-REMPLISSAGE DES PN ===

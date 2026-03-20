@@ -745,11 +745,51 @@ const Settings = (() => {
             if ((line.zoneIds || []).includes(desserteId)) ligneNames.push(line.nom);
           });
         });
-        if (ligneNames.length > 0) {
-          inputs.ligne.value = [...new Set(ligneNames)].join(', ');
+        const unique = [...new Set(ligneNames)];
+        if (unique.length === 1) {
+          inputs.ligne.value = unique[0];
+        } else if (unique.length > 1) {
+          showSettingsLigneSelector(inputs.ligne, unique);
         }
       }
     }
+  }
+
+  function showSettingsLigneSelector(inputEl, lignes) {
+    const old = document.getElementById('settings-ligne-selector');
+    if (old) old.remove();
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'settings-ligne-selector';
+    dropdown.style.cssText = 'position:absolute;left:0;right:0;top:100%;background:var(--surface);border:1px solid var(--accent);border-radius:3px;z-index:320;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-height:150px;overflow-y:auto;';
+
+    lignes.forEach(nom => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--text);cursor:pointer;';
+      item.textContent = nom;
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--surface2)');
+      item.addEventListener('mouseleave', () => item.style.background = 'none');
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        inputEl.value = nom;
+        dropdown.remove();
+      });
+      dropdown.appendChild(item);
+    });
+
+    const parent = inputEl.parentElement;
+    if (parent) {
+      parent.style.position = 'relative';
+      parent.appendChild(dropdown);
+    }
+
+    const closeHandler = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== inputEl) {
+        dropdown.remove();
+        document.removeEventListener('mousedown', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 50);
   }
 
   function renderInfraTab(container, elType, label) {
