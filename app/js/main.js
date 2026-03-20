@@ -69,7 +69,7 @@
     const viewer = Viewer.getMainViewer();
     const onReady = () => {
       Annotations.init();
-      Annotations.setupCustomAnnotations();
+      Annotations.setupImageLibrary();
       Annotations.setupLegend();
       Search.init();
       Export.init();

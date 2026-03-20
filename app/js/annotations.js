@@ -193,48 +193,16 @@ const Annotations = (() => {
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
       }
-      // Machine de secours (image)
-      else if (activeTool === 'machine-secours') {
-        addImageAnnotation(viewportPoint.x, viewportPoint.y, '/app/img/machine-secours.png', 'Machine secours');
+      // Image depuis la bibliothèque
+      else if (activeTool === 'image-library' && pendingImageSrc) {
+        addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
+        hideStatusMessage();
+        // Rester en mode placement pour poser plusieurs fois la même image
       }
       // Texte libre
       else if (activeTool === 'text') {
         const text = prompt('Texte :');
         if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
-      }
-      // Annotations custom
-      else if (activeTool && activeTool.startsWith('custom-')) {
-        const idx = parseInt(activeTool.replace('custom-', ''), 10);
-        const custom = customAnnotations[idx];
-        if (!custom) return;
-
-        if (custom.placement === 'image' && custom.imageDataUrl) {
-          // Placer comme annotation image avec l'image uploadée
-          addImageAnnotation(viewportPoint.x, viewportPoint.y, custom.imageDataUrl, custom.name);
-        } else if (custom.placement === 'line') {
-          if (!pendingFirstPoint) {
-            pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
-            showStatusMessage('Cliquez le 2ème point');
-          } else {
-            addLineAnnotation(activeTool, pendingFirstPoint.x, pendingFirstPoint.y, viewportPoint.x, viewportPoint.y);
-            // Override label et color avec le custom
-            const lastAnnot = annotations[annotations.length - 1];
-            lastAnnot.label = custom.name;
-            lastAnnot.color = custom.color;
-            lastAnnot.symbol = custom.symbol;
-            pendingFirstPoint = null;
-            hideStatusMessage();
-            redraw();
-          }
-        } else {
-          addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, custom.name);
-          // Override avec les propriétés custom
-          const lastAnnot = annotations[annotations.length - 1];
-          lastAnnot.symbol = custom.symbol;
-          lastAnnot.color = custom.color;
-          lastAnnot.label = custom.name;
-          redraw();
-        }
       }
     });
 
@@ -644,30 +612,19 @@ const Annotations = (() => {
       { label: 'Voie libérée (2 pts)', icon: '━', color: '#00d4a0', tool: 'voie-libre' },
       { label: 'Caténaire (2 pts)', icon: '━', color: '#3080ff', tool: 'catenaire' },
       { label: 'Texte libre', icon: 'T', color: '#c8daf5', tool: 'text' },
+      { label: 'Image...', icon: '🖼', color: '#c8daf5', tool: 'image-library-menu' },
     ];
-
-    // Ajouter les custom
-    customAnnotations.forEach((custom, i) => {
-      addOptions.push({
-        label: custom.name,
-        icon: custom.symbol,
-        color: custom.color,
-        tool: 'custom-' + i,
-        isCustom: true,
-        placement: custom.placement,
-        imageDataUrl: custom.imageDataUrl || null,
-      });
-    });
 
     addOptions.forEach(opt => {
       const item = createMenuItem(opt.icon, opt.label, opt.color, () => {
         closeContextMenu();
-        if (TRAIN_SYMBOLS[opt.tool]) {
+        if (opt.tool === 'image-library-menu') {
+          showImageLibrary();
+        } else if (TRAIN_SYMBOLS[opt.tool]) {
           promptTrainNumber((num) => {
             addTrainAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, num);
           });
         } else if (TWO_POINT_TOOLS.includes(opt.tool)) {
-          // Activer l'outil et stocker le premier point
           setActiveTool(opt.tool);
           pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
           showStatusMessage('Cliquez le 2ème point pour tracer la ligne');
@@ -676,21 +633,6 @@ const Annotations = (() => {
         } else if (opt.tool === 'text') {
           const text = prompt('Texte :');
           if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
-        } else if (opt.isCustom) {
-          if (opt.placement === 'image' && opt.imageDataUrl) {
-            addImageAnnotation(viewportPoint.x, viewportPoint.y, opt.imageDataUrl, opt.label);
-          } else if (opt.placement === 'line') {
-            setActiveTool(opt.tool);
-            pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
-            showStatusMessage('Cliquez le 2ème point pour tracer la ligne');
-          } else {
-            addMarkerAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, opt.label);
-            const lastAnnot = annotations[annotations.length - 1];
-            lastAnnot.symbol = opt.icon;
-            lastAnnot.color = opt.color;
-            lastAnnot.label = opt.label;
-            redraw();
-          }
         }
       });
       menu.appendChild(item);
@@ -1499,209 +1441,169 @@ const Annotations = (() => {
 
   function getAnnotations() { return annotations; }
 
-  // === ANNOTATIONS CUSTOM ===
+  // === BIBLIOTHÈQUE D'IMAGES ===
 
-  function setupCustomAnnotations() {
-    loadCustomAnnotations();
-    renderCustomButtons();
+  let imageLibrary = []; // { name, dataUrl }
 
-    const addBtn = document.getElementById('btn-add-custom');
-    if (addBtn) addBtn.addEventListener('click', showCustomForm);
+  function loadImageLibrary() {
+    try {
+      const saved = Store.getJSON('eic_image_library', null);
+      if (saved) imageLibrary = saved;
+    } catch {}
   }
 
-  function renderCustomButtons() {
-    const container = document.getElementById('custom-tools');
-    if (!container) return;
-    container.innerHTML = '';
-
-    customAnnotations.forEach((custom, index) => {
-      const btn = document.createElement('div');
-      btn.className = 'custom-tool-btn';
-      btn.dataset.customIndex = index;
-      const iconHtml = custom.imageDataUrl
-        ? `<img src="${custom.imageDataUrl}" style="max-height:16px;max-width:24px;vertical-align:middle;">`
-        : `<span style="color:${custom.color}">${custom.symbol}</span>`;
-      btn.innerHTML = `
-        <span class="tool-icon">${iconHtml}</span>
-        <span class="tool-label">${custom.name}</span>
-        <button class="custom-tool-delete" title="Supprimer ce type">×</button>
-      `;
-
-      btn.addEventListener('click', (e) => {
-        if (e.target.classList.contains('custom-tool-delete')) {
-          e.stopPropagation();
-          if (confirm(`Supprimer l'annotation "${custom.name}" ?`)) {
-            customAnnotations.splice(index, 1);
-            saveCustomAnnotations();
-            renderCustomButtons();
-          }
-          return;
-        }
-        const toolId = 'custom-' + index;
-        const isActive = btn.classList.contains('active');
-        // Désactiver tous les outils
-        document.querySelectorAll('.tool-btn, .custom-tool-btn').forEach(b => b.classList.remove('active'));
-        if (isActive) {
-          setActiveTool(null);
-        } else {
-          btn.classList.add('active');
-          setActiveTool(toolId);
-        }
-      });
-
-      container.appendChild(btn);
-    });
+  function saveImageLibrary() {
+    try {
+      Store.set('eic_image_library', imageLibrary);
+    } catch {}
   }
 
-  function showCustomForm() {
-    const popup = document.getElementById('custom-annotation-popup');
-    if (!popup) return;
-    popup.classList.remove('hidden');
+  // Images par défaut depuis le dossier img/
+  const DEFAULT_IMAGES = [
+    '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
+    'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
+    'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
+  ];
 
-    let selectedSymbol = '●';
-    let selectedColor = '#ff4040';
-    let selectedPlacement = 'point';
-    let selectedImageDataUrl = null;
+  function setupImageLibrary() {
+    loadImageLibrary();
+    const btn = document.getElementById('btn-image-library');
+    if (btn) btn.addEventListener('click', showImageLibrary);
+  }
 
-    // Reset
-    document.getElementById('custom-name').value = '';
-    document.getElementById('custom-symbol-text').value = '';
-    const imgPreview = document.getElementById('custom-image-preview');
-    if (imgPreview) imgPreview.classList.add('hidden');
-    const imgFile = document.getElementById('custom-image-file');
-    if (imgFile) imgFile.value = '';
-    updatePreview();
+  function showImageLibrary() {
+    const old = document.getElementById('image-library-modal');
+    if (old) old.remove();
 
-    // Symbol picker
-    document.querySelectorAll('.symbol-opt').forEach(btn => {
-      btn.classList.remove('selected');
-      btn.onclick = () => {
-        document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        selectedSymbol = btn.dataset.symbol;
-        selectedImageDataUrl = null;
-        clearImagePreview();
-        document.getElementById('custom-symbol-text').value = '';
-        updatePreview();
-      };
-    });
-    document.querySelectorAll('.symbol-opt')[0].classList.add('selected');
+    const overlay = document.createElement('div');
+    overlay.id = 'image-library-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
 
-    // Symbol text input
-    document.getElementById('custom-symbol-text').addEventListener('input', (e) => {
-      if (e.target.value) {
-        selectedSymbol = e.target.value;
-        selectedImageDataUrl = null;
-        clearImagePreview();
-        document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
-        updatePreview();
-      }
-    });
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
 
-    // Image upload
-    const imageBtn = document.getElementById('custom-image-btn');
-    const imageFileInput = document.getElementById('custom-image-file');
-    const imagePreviewArea = document.getElementById('custom-image-preview');
-    const imageThumb = document.getElementById('custom-image-thumb');
-    const imageClearBtn = document.getElementById('custom-image-clear');
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const title = document.createElement('span');
+    title.style.cssText = 'font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);';
+    title.textContent = 'Bibliothèque d\'images';
+    header.appendChild(title);
 
-    if (imageBtn) {
-      imageBtn.onclick = () => imageFileInput.click();
-    }
-    if (imageFileInput) {
-      imageFileInput.onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    const headerBtns = document.createElement('div');
+    headerBtns.style.cssText = 'display:flex;gap:6px;align-items:center;';
+
+    // Bouton upload
+    const uploadBtn = document.createElement('button');
+    uploadBtn.style.cssText = 'padding:4px 10px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+    uploadBtn.textContent = '+ Ajouter';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.multiple = true;
+    fileInput.style.display = 'none';
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      Array.from(fileInput.files).forEach(file => {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          selectedImageDataUrl = ev.target.result;
-          selectedSymbol = '🖼';
-          document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
-          document.getElementById('custom-symbol-text').value = '';
-          if (imagePreviewArea) imagePreviewArea.classList.remove('hidden');
-          if (imageThumb) imageThumb.src = selectedImageDataUrl;
-          updatePreview();
+          const name = file.name.replace(/\.[^.]+$/, '');
+          imageLibrary.push({ name, dataUrl: ev.target.result });
+          saveImageLibrary();
+          renderGrid();
         };
         reader.readAsDataURL(file);
-      };
-    }
-    if (imageClearBtn) {
-      imageClearBtn.onclick = () => {
-        selectedImageDataUrl = null;
-        clearImagePreview();
-        selectedSymbol = '●';
-        document.querySelectorAll('.symbol-opt')[0].classList.add('selected');
-        updatePreview();
-      };
-    }
-
-    function clearImagePreview() {
-      if (imagePreviewArea) imagePreviewArea.classList.add('hidden');
-      if (imageThumb) imageThumb.src = '';
-      if (imageFileInput) imageFileInput.value = '';
-    }
-
-    // Color picker
-    document.querySelectorAll('.color-opt').forEach(btn => {
-      btn.classList.remove('selected');
-      btn.onclick = () => {
-        document.querySelectorAll('.color-opt').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        selectedColor = btn.dataset.color;
-        updatePreview();
-      };
+      });
+      fileInput.value = '';
     });
-    document.querySelectorAll('.color-opt')[0].classList.add('selected');
+    headerBtns.appendChild(uploadBtn);
+    headerBtns.appendChild(fileInput);
 
-    // Placement
-    document.querySelectorAll('.placement-opt').forEach(btn => {
-      btn.onclick = () => {
-        document.querySelectorAll('.placement-opt').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        selectedPlacement = btn.dataset.placement;
-      };
-    });
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    headerBtns.appendChild(closeBtn);
+    header.appendChild(headerBtns);
+    panel.appendChild(header);
 
-    function updatePreview() {
-      const previewSymbol = document.getElementById('preview-symbol');
-      const previewName = document.getElementById('preview-name');
-      if (previewSymbol) {
-        if (selectedImageDataUrl) {
-          previewSymbol.innerHTML = `<img src="${selectedImageDataUrl}" style="max-height:28px;max-width:48px;vertical-align:middle;">`;
-        } else {
-          previewSymbol.textContent = selectedSymbol;
-          previewSymbol.style.color = selectedColor;
-        }
-      }
-      if (previewName) previewName.textContent = document.getElementById('custom-name').value || 'Annotation';
+    // Info
+    const info = document.createElement('div');
+    info.style.cssText = 'padding:4px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);';
+    info.textContent = 'Cliquez sur une image pour l\'utiliser comme annotation. Clic droit pour supprimer.';
+    panel.appendChild(info);
+
+    // Grille d'images
+    const gridDiv = document.createElement('div');
+    gridDiv.style.cssText = 'overflow-y:auto;flex:1;padding:10px 14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;';
+    panel.appendChild(gridDiv);
+
+    function renderGrid() {
+      gridDiv.innerHTML = '';
+
+      // Images par défaut (dossier img/)
+      DEFAULT_IMAGES.forEach(filename => {
+        const card = createImageCard('img/' + filename, filename.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true);
+        gridDiv.appendChild(card);
+      });
+
+      // Images uploadées
+      imageLibrary.forEach((img, index) => {
+        const card = createImageCard(img.dataUrl, img.name, false, index);
+        gridDiv.appendChild(card);
+      });
     }
 
-    document.getElementById('custom-name').addEventListener('input', updatePreview);
+    function createImageCard(src, name, isDefault, libraryIndex) {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color 0.15s;';
+      card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
+      card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
 
-    // Confirm
-    document.getElementById('custom-confirm').onclick = () => {
-      const name = document.getElementById('custom-name').value.trim();
-      if (!name) { document.getElementById('custom-name').focus(); return; }
+      const img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-height:50px;max-width:100%;object-fit:contain;';
+      img.alt = name;
+      card.appendChild(img);
 
-      const customDef = {
-        name: name,
-        symbol: selectedSymbol,
-        color: selectedColor,
-        placement: selectedImageDataUrl ? 'image' : selectedPlacement,
-      };
-      if (selectedImageDataUrl) {
-        customDef.imageDataUrl = selectedImageDataUrl;
+      const label = document.createElement('span');
+      label.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+      label.textContent = name;
+      card.appendChild(label);
+
+      // Clic gauche → sélectionner comme outil d'annotation
+      card.addEventListener('click', () => {
+        overlay.remove();
+        setActiveTool('image-library');
+        pendingImageSrc = src;
+        pendingImageLabel = name;
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        showStatusMessage('Cliquez sur le schéma pour placer "' + name + '"');
+      });
+
+      // Clic droit → supprimer (seulement les images uploadées)
+      if (!isDefault) {
+        card.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          if (confirm('Supprimer "' + name + '" de la bibliothèque ?')) {
+            imageLibrary.splice(libraryIndex, 1);
+            saveImageLibrary();
+            renderGrid();
+          }
+        });
       }
-      customAnnotations.push(customDef);
-      saveCustomAnnotations();
-      renderCustomButtons();
-      popup.classList.add('hidden');
-    };
 
-    // Close
-    document.getElementById('custom-close').onclick = () => popup.classList.add('hidden');
-    popup.querySelector('.popup-overlay').onclick = () => popup.classList.add('hidden');
+      return card;
+    }
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    renderGrid();
   }
+
+  // Image en attente de placement
+  let pendingImageSrc = null;
+  let pendingImageLabel = null;
 
   // === LÉGENDE ===
   let legendVisible = false;
@@ -1856,7 +1758,7 @@ const Annotations = (() => {
     redo,
     setupLegend,
     refreshLegend,
-    setupCustomAnnotations,
+    setupImageLibrary,
     getActiveTool,
   };
 })();
