@@ -267,7 +267,10 @@ const Calibrate = (() => {
 
   function getGareName(gareId) {
     if (!gareId) return '';
-    const gare = Data.getGare(gareId) || Data.getAllDessertes().get(gareId) || null;
+    // Chercher d'abord dans les dessertes (nom complet) avant les gares PDF (nom court)
+    const desserte = Data.getAllDessertes().get(gareId);
+    if (desserte) return desserte.nom;
+    const gare = Data.getGare(gareId);
     return gare ? gare.nom : '';
   }
 
