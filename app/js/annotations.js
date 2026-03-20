@@ -314,13 +314,22 @@ const Annotations = (() => {
         const pxDx = p2.x - p1.x;
         const pxDy = p2.y - p1.y;
 
-        let newW = resizeAnnotOrigin.w;
-        let newH = resizeAnnotOrigin.h;
+        // Resize proportionnel : utiliser le delta le plus grand
+        const ratio = resizeAnnotOrigin.w / resizeAnnotOrigin.h;
+        let delta = 0;
+        if (resizeAnnotHandle.includes('e')) delta = pxDx;
+        else if (resizeAnnotHandle.includes('w')) delta = -pxDx;
+        else if (resizeAnnotHandle.includes('s')) delta = pxDy * ratio;
+        else if (resizeAnnotHandle.includes('n')) delta = -pxDy * ratio;
+        // Pour les coins, prendre le plus grand des deux
+        if (resizeAnnotHandle.length === 2) {
+          const dW = resizeAnnotHandle.includes('e') ? pxDx : -pxDx;
+          const dH = (resizeAnnotHandle.includes('s') ? pxDy : -pxDy) * ratio;
+          delta = Math.abs(dW) > Math.abs(dH) ? dW : dH;
+        }
 
-        if (resizeAnnotHandle.includes('e')) newW = Math.max(20, resizeAnnotOrigin.w + pxDx);
-        if (resizeAnnotHandle.includes('w')) newW = Math.max(20, resizeAnnotOrigin.w - pxDx);
-        if (resizeAnnotHandle.includes('s')) newH = Math.max(10, resizeAnnotOrigin.h + pxDy);
-        if (resizeAnnotHandle.includes('n')) newH = Math.max(10, resizeAnnotOrigin.h - pxDy);
+        const newW = Math.max(20, resizeAnnotOrigin.w + delta);
+        const newH = Math.max(10, newW / ratio);
 
         selectedAnnot.imgW = Math.round(newW);
         selectedAnnot.imgH = Math.round(newH);
