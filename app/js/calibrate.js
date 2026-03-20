@@ -528,6 +528,19 @@ const Calibrate = (() => {
     selCanvas = null;
   }
 
+  // Convertir pixels CSS overlay → coordonnées viewport OSD
+  function overlayToViewport(px, py) {
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return { x: 0, y: 0 };
+    const osdEl = document.getElementById('osd-viewer');
+    const osdRect = osdEl.getBoundingClientRect();
+    const overlayRect = selOverlay.getBoundingClientRect();
+    // Corriger le décalage entre overlay et osd-viewer
+    const osdX = px + overlayRect.left - osdRect.left;
+    const osdY = py + overlayRect.top - osdRect.top;
+    return viewer.viewport.pointFromPixel(new OpenSeadragon.Point(osdX, osdY));
+  }
+
   function onShapeMouseDown(e) {
     const rect = selOverlay.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -587,10 +600,7 @@ const Calibrate = (() => {
       shapeBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 
       // Convertir en coordonnées viewport
-      shapeContour = freePoints.map(p => {
-        const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(p.x, p.y));
-        return { x: vp.x, y: vp.y };
-      });
+      shapeContour = freePoints.map(p => overlayToViewport(p.x, p.y));
     } else if (shapeMode === 'circle') {
       if (!currentRect || currentRect.radius < 5) { cancelShapeDrawing(); startShapeDrawing('circle'); return; }
       const r = currentRect.radius;
@@ -603,11 +613,11 @@ const Calibrate = (() => {
     // Calculer le centre en coordonnées viewport OSD
     const centerX = shapeBounds.x + shapeBounds.w / 2;
     const centerY = shapeBounds.y + shapeBounds.h / 2;
-    const vpCenter = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(centerX, centerY));
+    const vpCenter = overlayToViewport(centerX, centerY);
 
     // Convertir les bounds en viewport
-    const vpTopLeft = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(shapeBounds.x, shapeBounds.y));
-    const vpBottomRight = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(shapeBounds.x + shapeBounds.w, shapeBounds.y + shapeBounds.h));
+    const vpTopLeft = overlayToViewport(shapeBounds.x, shapeBounds.y);
+    const vpBottomRight = overlayToViewport(shapeBounds.x + shapeBounds.w, shapeBounds.y + shapeBounds.h);
 
     pendingCoords = { x: vpCenter.x, y: vpCenter.y };
     pendingShape = {
@@ -812,7 +822,7 @@ const Calibrate = (() => {
       if (sel) drawHandles(ctx, sel);
     }
 
-    drawDebugLegend(ctx);
+    drawDebugLegend(ctx, allElements);
   }
 
   function drawHandles(ctx, el) {
@@ -966,27 +976,34 @@ const Calibrate = (() => {
     return map[handle] || 'pointer';
   }
 
-  function drawDebugLegend(ctx) {
+  function drawDebugLegend(ctx, allElements) {
+    const withShape = allElements.filter(e => e.shape && e.shape.bounds).length;
+    const total = allElements.length;
+
     const x = 10, y = debugCanvas.height - 10;
     const types = Object.entries(TYPE_COLORS);
     const lh = 14;
-    const totalH = types.length * lh + 8;
+    const totalH = types.length * lh + 30;
 
     ctx.save();
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = 'rgba(12,18,32,0.9)';
-    ctx.fillRect(x, y - totalH, 100, totalH);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'rgba(12,18,32,0.92)';
+    ctx.fillRect(x, y - totalH, 150, totalH);
     ctx.font = '9px "JetBrains Mono", monospace';
 
+    // Compteur
+    ctx.fillStyle = '#ff9520';
+    ctx.fillText(`${total} elem · ${withShape} zones`, x + 6, y - totalH + 12);
+
     types.forEach(([type, color], i) => {
-      const ly = y - totalH + 12 + i * lh;
+      const ly = y - totalH + 28 + i * lh;
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.arc(x + 8, ly - 3, 4, 0, Math.PI * 2);
       ctx.fill();
+      const count = allElements.filter(e => e.type === type).length;
       ctx.fillStyle = '#c8daf5';
-      ctx.fillText(type, x + 18, ly);
+      ctx.fillText(`${type} (${count})`, x + 18, ly);
     });
     ctx.restore();
   }
