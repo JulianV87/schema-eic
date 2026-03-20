@@ -959,11 +959,27 @@ const Settings = (() => {
       pn.secteur = inputs.secteur.value.trim();
       pn.validated = true;
 
-      // Résoudre la gare
+      // Résoudre la desserte (chercher dans toutes les dessertes, pas juste les gares PDF)
       const gareName = inputs._gare.value.trim();
       if (gareName) {
-        const matches = Data.searchGare(gareName);
-        pn.gare_id = matches.length > 0 ? matches[0].id : pn.gare_id;
+        const q = normalize(gareName);
+        let found = null;
+        // Chercher d'abord une correspondance exacte dans toutes les dessertes
+        Data.getAllDessertes().forEach((d, id) => {
+          if (!found && normalize(d.nom) === q) found = id;
+        });
+        // Sinon chercher une correspondance partielle
+        if (!found) {
+          Data.getAllDessertes().forEach((d, id) => {
+            if (!found && normalize(d.nom).includes(q)) found = id;
+          });
+        }
+        // Fallback sur les gares PDF
+        if (!found) {
+          const matches = Data.searchGare(gareName);
+          if (matches.length > 0) found = matches[0].id;
+        }
+        pn.gare_id = found || pn.gare_id;
       } else {
         pn.gare_id = null;
       }

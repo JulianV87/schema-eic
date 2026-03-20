@@ -182,12 +182,28 @@ const Calibrate = (() => {
     const pk = document.getElementById('calibrate-pk').value.trim();
     const secteur = document.getElementById('calibrate-secteur').value.trim();
 
-    // Trouver la gare par nom
+    // Trouver la desserte par nom (toutes les dessertes, pas juste les gares PDF)
     let gareId = null;
     if (gareName) {
-      const matches = Data.searchGare(gareName);
-      if (matches.length > 0) {
-        gareId = matches[0].id;
+      const q = gareName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
+      Data.getAllDessertes().forEach((d, id) => {
+        if (!gareId) {
+          const n = (d.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
+          if (n === q) gareId = id;
+        }
+      });
+      if (!gareId) {
+        Data.getAllDessertes().forEach((d, id) => {
+          if (!gareId) {
+            const n = (d.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
+            if (n.includes(q)) gareId = id;
+          }
+        });
+      }
+      // Fallback gares PDF
+      if (!gareId) {
+        const matches = Data.searchGare(gareName);
+        if (matches.length > 0) gareId = matches[0].id;
       }
     }
 
