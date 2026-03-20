@@ -1360,10 +1360,18 @@ const Settings = (() => {
     countEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--muted);';
     footer.appendChild(countEl);
 
+    const btnGroup = document.createElement('div');
+    btnGroup.style.cssText = 'display:flex;gap:6px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'padding:5px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    btnGroup.appendChild(cancelBtn);
     const saveBtn = document.createElement('button');
     saveBtn.style.cssText = 'padding:5px 16px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
     saveBtn.textContent = 'Enregistrer';
-    footer.appendChild(saveBtn);
+    btnGroup.appendChild(saveBtn);
+    footer.appendChild(btnGroup);
     panel.appendChild(footer);
 
     // État des sélections
@@ -1420,9 +1428,7 @@ const Settings = (() => {
       renderTab('lignes');
     });
 
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
+    // Ne pas fermer en cliquant à côté — uniquement via Enregistrer ou ✕
 
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
