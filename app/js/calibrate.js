@@ -145,19 +145,43 @@ const Calibrate = (() => {
     let closest = null;
     let minDist = threshold;
 
-    const elements = Data.searchElementFuzzy(''); // Tous les éléments (hack)
-    // Fallback: chercher dans toutes les zones
-    Data.getZones().forEach(z => {
-      Data.getElementsForZone(z.id).forEach(el => {
-        const dx = el.x_pct - x;
-        const dy = el.y_pct - y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = el;
+    const allElements = Data.searchElementFuzzy(''); // Tous les éléments
+
+    // 1. D'abord chercher si le point est à l'intérieur d'une forme sauvegardée
+    for (const el of allElements) {
+      if (el.shape && el.shape.bounds) {
+        const b = el.shape.bounds;
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+          return el; // Le clic est dans la zone calibrée
         }
-      });
+      }
+    }
+
+    // 2. Sinon chercher par proximité au point central
+    allElements.forEach(el => {
+      const dx = el.x_pct - x;
+      const dy = el.y_pct - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = el;
+      }
     });
+
+    // 3. Fallback: chercher dans les éléments par zone
+    if (!closest) {
+      Data.getZones().forEach(z => {
+        Data.getElementsForZone(z.id).forEach(el => {
+          const dx = el.x_pct - x;
+          const dy = el.y_pct - y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDist) {
+            minDist = dist;
+            closest = el;
+          }
+        });
+      });
+    }
 
     return closest;
   }
