@@ -717,17 +717,38 @@ const Settings = (() => {
     return getAllElementsByType('pn');
   }
 
-  // === AUTO-REMPLISSAGE SECTEUR SELON DESSERTE ===
+  // === AUTO-REMPLISSAGE SECTEUR ET LIGNE SELON DESSERTE ===
   const DESSERTE_SECTEUR_MAP = {
     'paris nord grandes lignes': '1 GL',
   };
 
   function autoFillSecteur(gareName, inputs) {
-    if (!inputs || !inputs.secteur) return;
+    if (!inputs) return;
     const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
-    const secteur = DESSERTE_SECTEUR_MAP[norm(gareName)];
-    if (secteur) {
-      inputs.secteur.value = secteur;
+    // Secteur
+    if (inputs.secteur) {
+      const secteur = DESSERTE_SECTEUR_MAP[norm(gareName)];
+      if (secteur) inputs.secteur.value = secteur;
+    }
+    // Ligne — chercher via le layout (desserte → ligne)
+    if (inputs.ligne && gareName) {
+      const q = norm(gareName);
+      let desserteId = null;
+      Data.getAllDessertes().forEach((d, id) => {
+        if (!desserteId && norm(d.nom) === q) desserteId = id;
+      });
+      if (desserteId) {
+        const layout = getLayout();
+        const ligneNames = [];
+        (layout.tables || []).forEach(t => {
+          (t.lines || []).forEach(line => {
+            if ((line.zoneIds || []).includes(desserteId)) ligneNames.push(line.nom);
+          });
+        });
+        if (ligneNames.length > 0) {
+          inputs.ligne.value = [...new Set(ligneNames)].join(', ');
+        }
+      }
     }
   }
 

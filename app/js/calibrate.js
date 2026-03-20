@@ -1555,7 +1555,7 @@ const Calibrate = (() => {
     }
   }
 
-  // === AUTO-REMPLISSAGE SECTEUR SELON DESSERTE ===
+  // === AUTO-REMPLISSAGE SECTEUR ET LIGNE SELON DESSERTE ===
 
   const DESSERTE_SECTEUR_MAP = {
     'paris nord grandes lignes': '1 GL',
@@ -1563,9 +1563,45 @@ const Calibrate = (() => {
 
   function autoFillSecteur(gareName) {
     const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Auto-remplir le secteur
     const secteur = DESSERTE_SECTEUR_MAP[norm(gareName)];
     if (secteur) {
       document.getElementById('calibrate-secteur').value = secteur;
+    }
+    // Auto-remplir la ligne à partir du layout (desserte → ligne)
+    autoFillLigne(gareName);
+  }
+
+  function autoFillLigne(gareName) {
+    if (!gareName) return;
+    const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
+    const q = norm(gareName);
+
+    // Trouver l'id de la desserte
+    let desserteId = null;
+    Data.getAllDessertes().forEach((d, id) => {
+      if (!desserteId && norm(d.nom) === q) desserteId = id;
+    });
+    if (!desserteId) return;
+
+    // Chercher dans le layout quelle(s) ligne(s) contiennent cette desserte
+    let layout = null;
+    try { layout = Store.getJSON('eic_zone_layout', {}); } catch { return; }
+    if (!layout || !layout.tables) return;
+
+    const ligneNames = [];
+    layout.tables.forEach(t => {
+      (t.lines || []).forEach(line => {
+        if ((line.zoneIds || []).includes(desserteId)) {
+          ligneNames.push(line.nom);
+        }
+      });
+    });
+
+    if (ligneNames.length > 0) {
+      // Dédoublonner les noms de ligne
+      const unique = [...new Set(ligneNames)];
+      document.getElementById('calibrate-ligne').value = unique.join(', ');
     }
   }
 
