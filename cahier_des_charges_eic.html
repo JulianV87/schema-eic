@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cahier des Charges — EIC Paris Nord · Outil de Gestion de Crise</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #06090f;
+  --surface: #0c1220;
+  --surface2: #111a2e;
+  --surface3: #162038;
+  --border: #1e304a;
+  --border2: #2a4266;
+  --text: #c8daf5;
+  --muted: #4a6a9a;
+  --accent: #3080ff;
+  --accent2: #00d4a0;
+  --warn: #ff9520;
+  --danger: #ff4040;
+  --purple: #9060ff;
+  --pink: #ff40a0;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Inter', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* LAYOUT */
+.page { max-width: 960px; margin: 0 auto; padding: 48px 32px 80px; }
+
+/* HEADER */
+.doc-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 32px;
+  margin-bottom: 48px;
+  position: relative;
+}
+.doc-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2), var(--purple));
+  opacity: 0.6;
+}
+.doc-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.doc-meta span { color: var(--accent2); }
+.doc-title {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+}
+.doc-title em { color: var(--accent); font-style: normal; }
+.doc-subtitle {
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 300;
+  letter-spacing: 0.5px;
+}
+.badges {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+.badge-blue   { color: var(--accent);  border-color: var(--accent);  background: rgba(48,128,255,.08); }
+.badge-green  { color: var(--accent2); border-color: var(--accent2); background: rgba(0,212,160,.08); }
+.badge-orange { color: var(--warn);    border-color: var(--warn);    background: rgba(255,149,32,.08); }
+.badge-purple { color: var(--purple);  border-color: var(--purple);  background: rgba(144,96,255,.08); }
+
+/* NAV */
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 48px;
+}
+.toc-title {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.toc-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 24px;
+}
+.toc-list li a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  font-family: var(--mono);
+  letter-spacing: 0.3px;
+  transition: color .12s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toc-list li a:hover { color: var(--accent2); }
+.toc-num {
+  color: var(--border2);
+  font-size: 10px;
+  min-width: 20px;
+}
+
+/* SECTIONS */
+.section {
+  margin-bottom: 56px;
+  scroll-margin-top: 24px;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.section-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(48,128,255,.1);
+  border: 1px solid rgba(48,128,255,.2);
+  padding: 3px 8px;
+  border-radius: 3px;
+  letter-spacing: 1px;
+}
+.section-title {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+
+/* CARDS */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-title.blue   { color: var(--accent); }
+.card-title.green  { color: var(--accent2); }
+.card-title.orange { color: var(--warn); }
+.card-title.danger { color: var(--danger); }
+.card-title.purple { color: var(--purple); }
+.card p { color: var(--text); font-size: 13px; margin-bottom: 8px; }
+.card p:last-child { margin-bottom: 0; }
+
+/* FEATURE GRID */
+.feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+  transition: border-color .15s;
+}
+.feature-card:hover { border-color: var(--border2); }
+.feature-card.highlight { border-color: var(--accent2); background: rgba(0,212,160,.04); }
+.feature-icon {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.feature-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.feature-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* CODE BLOCKS */
+.code-block {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 16px 18px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  margin: 12px 0;
+  overflow-x: auto;
+  line-height: 1.8;
+}
+.code-block .cm { color: var(--muted); }
+.code-block .ck { color: var(--accent2); }
+.code-block .cv { color: var(--warn); }
+.code-block .ct { color: var(--accent); }
+.code-block .cs { color: var(--purple); }
+
+/* SCENARIO BLOCK */
+.scenario {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin: 16px 0;
+  position: relative;
+}
+.scenario::before {
+  content: 'SCÉNARIO';
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--warn);
+  position: absolute;
+  top: -1px;
+  left: 16px;
+  background: var(--surface2);
+  padding: 0 6px;
+  transform: translateY(-50%);
+}
+.scenario p { font-size: 13px; color: var(--text); }
+.scenario strong { color: var(--warn); font-weight: 600; }
+
+/* UI MOCKUP */
+.mockup {
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.mockup-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mockup-bar span { color: var(--accent2); }
+.mockup-content {
+  display: flex;
+  gap: 10px;
+}
+.mockup-side {
+  width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  flex-shrink: 0;
+}
+.mockup-main {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  min-height: 120px;
+  position: relative;
+}
+.mockup-item {
+  padding: 3px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: default;
+  border-left: 2px solid transparent;
+}
+.mockup-item.active { color: var(--accent2); border-left-color: var(--accent2); background: rgba(0,212,160,.05); }
+.mockup-item.danger { color: var(--danger); border-left-color: var(--danger); }
+.mockup-schema-hint {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  margin-top: 40px;
+  opacity: 0.5;
+}
+.mockup-zoom {
+  position: absolute;
+  bottom: 8px; right: 8px;
+  width: 100px; height: 70px;
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--accent);
+}
+
+/* TABLE */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+  margin: 12px 0;
+}
+.data-table th {
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+.data-table td {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: top;
+}
+.data-table tr:hover td { background: var(--surface); }
+.data-table .key { color: var(--accent2); }
+.data-table .type { color: var(--warn); }
+.data-table .desc { color: var(--muted); font-size: 10px; }
+
+/* DIFFICULTY BARS */
+.diff-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.diff-row:last-child { border-bottom: none; }
+.diff-label { flex: 1; color: var(--text); }
+.diff-bar {
+  display: flex;
+  gap: 3px;
+}
+.diff-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.diff-dot.fill-green  { background: var(--accent2); }
+.diff-dot.fill-orange { background: var(--warn); }
+.diff-dot.fill-red    { background: var(--danger); }
+.diff-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  min-width: 60px;
+  text-align: center;
+}
+.diff-tag.easy   { background: rgba(0,212,160,.15); color: var(--accent2); }
+.diff-tag.medium { background: rgba(255,149,32,.15); color: var(--warn); }
+.diff-tag.hard   { background: rgba(255,64,64,.15);  color: var(--danger); }
+
+/* TIMELINE */
+.timeline { padding-left: 20px; border-left: 2px solid var(--border2); margin: 16px 0; }
+.tl-item { position: relative; padding: 0 0 20px 20px; }
+.tl-item:last-child { padding-bottom: 0; }
+.tl-item::before {
+  content: '';
+  position: absolute;
+  left: -6px; top: 6px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  background: var(--bg);
+}
+.tl-item.done::before { background: var(--accent2); border-color: var(--accent2); }
+.tl-item.active::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px rgba(48,128,255,.2); }
+.tl-phase {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.tl-title { font-size: 13px; font-weight: 500; color: #fff; margin-bottom: 4px; }
+.tl-desc { font-size: 12px; color: var(--muted); }
+
+/* HIGHLIGHT BOX */
+.highlight-box {
+  border: 1px solid var(--accent2);
+  background: rgba(0,212,160,.05);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 16px 0;
+}
+.highlight-box .hb-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--accent2);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.highlight-box p { font-size: 13px; color: var(--text); }
+
+/* WARN BOX */
+.warn-box {
+  border: 1px solid var(--warn);
+  background: rgba(255,149,32,.05);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 12px 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.warn-box strong { color: var(--warn); }
+
+/* LIST */
+ul.clean { list-style: none; padding: 0; }
+ul.clean li {
+  padding: 5px 0 5px 18px;
+  position: relative;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+ul.clean li:last-child { border-bottom: none; }
+ul.clean li::before { content: '›'; position: absolute; left: 0; color: var(--accent2); }
+
+/* FOOTER */
+.doc-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+  margin-top: 48px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.doc-footer span { color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="doc-header">
+    <div class="doc-meta">Cahier des charges · <span>v1.0</span> · Mars 2026 · Confidentiel interne</div>
+    <div class="doc-title"><em>EIC Paris Nord</em> — Outil de Gestion de Crise</div>
+    <div class="doc-subtitle">Application de localisation, documentation et export des incidents ferroviaires</div>
+    <div class="badges">
+      <span class="badge badge-blue">SNCF · EIC Paris Nord</span>
+      <span class="badge badge-green">Supabase · PDF.js</span>
+      <span class="badge badge-orange">Durandal Integration</span>
+      <span class="badge badge-purple">Temps Réel · Collaboratif</span>
+    </div>
+  </div>
+
+  <!-- TABLE DES MATIÈRES -->
+  <div class="toc">
+    <div class="toc-title">Table des matières</div>
+    <ul class="toc-list">
+      <li><a href="#s1"><span class="toc-num">01</span> Contexte & Problème</a></li>
+      <li><a href="#s6"><span class="toc-num">06</span> Annotations & Symboles</a></li>
+      <li><a href="#s2"><span class="toc-num">02</span> Objectif de l'app</a></li>
+      <li><a href="#s7"><span class="toc-num">07</span> Templates de situation</a></li>
+      <li><a href="#s3"><span class="toc-num">03</span> Recherche & Navigation</a></li>
+      <li><a href="#s8"><span class="toc-num">08</span> Export Durandal</a></li>
+      <li><a href="#s4"><span class="toc-num">04</span> Schéma vectoriel & Zoom</a></li>
+      <li><a href="#s9"><span class="toc-num">09</span> Architecture technique</a></li>
+      <li><a href="#s5"><span class="toc-num">05</span> Représentation des trains</a></li>
+      <li><a href="#s10"><span class="toc-num">10</span> Faisabilité & Roadmap</a></li>
+    </ul>
+  </div>
+
+  <!-- 01 CONTEXTE -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <span class="section-title">Contexte & Problème actuel</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Qui utilise l'app</div>
+      <p>Régulateurs, chefs régulateurs et aides coordinateurs de l'EIC Paris Nord (SNCF). Utilisée en situation de crise ferroviaire — incidents, perturbations, accidents — où chaque seconde compte.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title danger">Processus actuel — inefficace</div>
+      <p>Lors d'un incident, le régulateur doit : naviguer manuellement dans un PDF de 460cm × 90cm, trouver la zone concernée, faire un imprim écran, ouvrir un outil externe, ajouter manuellement les symboles et annotations, puis coller le résultat dans <strong>Durandal</strong> (outil SNCF de gestion des incidents).</p>
+      <p style="margin-top:8px; color: var(--danger); font-size:12px; font-family: var(--mono);">⚠ Ce processus prend plusieurs minutes sous stress, alors qu'il devrait prendre moins de 30 secondes.</p>
+    </div>
+
+    <div class="scenario">
+      <p>On appelle le régulateur : <strong>« aig 17 absence de contrôle directoire de droite, train 67432 immobilisé entre Creil et Longueuil Km 58,2 »</strong>. Il doit immédiatement localiser l'aiguille 17 (qui existe dans plusieurs secteurs), positionner le train sur le schéma, identifier les trains impactés en amont et en aval, construire le schéma de situation et l'envoyer dans Durandal.</p>
+    </div>
+  </div>
+
+  <!-- 02 OBJECTIF -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <span class="section-title">Objectif de l'application</span>
+    </div>
+
+    <div class="highlight-box">
+      <div class="hb-label">Objectif principal</div>
+      <p>Remplacer le processus manuel (PDF → imprim écran → ajout à la main → Durandal) par un éditeur natif de schéma de situation, directement sur le schéma vectoriel du réseau EIC Paris Nord, avec export en un clic vers Durandal.</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card highlight">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-name">Vitesse</div>
+        <div class="feature-desc">De l'alerte au schéma exporté en moins de 30 secondes</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <div class="feature-name">Précision</div>
+        <div class="feature-desc">Localisation exacte des éléments sur le schéma vectoriel</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">👥</div>
+        <div class="feature-name">Collaboratif</div>
+        <div class="feature-desc">Plusieurs postes travaillent sur le même schéma en temps réel</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-name">Historique</div>
+        <div class="feature-desc">Tous les schémas exportés sont sauvegardés pour les REX</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 RECHERCHE -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <span class="section-title">Recherche & Navigation contextuelle</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">4 types de recherche</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Type</th><th>Exemple</th><th>Résultat</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="key">PK</td><td>Km 55,6 · 55.618</td><td>Zone + gare la plus proche</td></tr>
+          <tr><td class="key">Gare</td><td>Chantilly · Creil · Compiègne</td><td>Navigation directe sur la gare</td></tr>
+          <tr><td class="key">Élément infra</td><td>aig 17 · PN 8 · C2411 · cv 143</td><td>Liste de toutes les occurrences</td></tr>
+          <tr><td class="key">Secteur PRCI</td><td>PRCI Creil · Dionysien</td><td>Vue du secteur complet</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="warn-box">
+      <strong>Ambiguïté des identifiants :</strong> Un élément comme « aig 17 » existe dans plusieurs secteurs différents. L'app affiche toutes les occurrences avec leur contexte (gare + secteur + PK + ligne) et l'utilisateur choisit la bonne. Même logique pour les PKs : Creil possède plusieurs PKs selon la ligne de référence (Paris–Amiens Km 55,618 / Creil–Beauvais Km 0,000 / Creil–Jeumont Km 65,100).
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Navigation contextuelle — Fenêtre glissante</div>
+      <p>Une fois sur une gare, l'utilisateur peut étendre la vue avec des boutons <strong>+</strong> de chaque côté, en choisissant la granularité :</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-bar">
+          <span>[+ secteur]</span> &nbsp; [+ gare] &nbsp; ◀ &nbsp; Longueuil — Compiègne &nbsp; ▶ &nbsp; [+ gare] &nbsp; <span>[+ secteur]</span>
+        </div>
+        <div style="font-size:10px; color:var(--muted); text-align:center; padding:8px">
+          La vue principale reste fixe et exportable · la fenêtre s'élargit à chaque clic +
+        </div>
+      </div>
+      <p style="margin-top:8px">Aux <strong style="color:var(--warn)">bifurcations</strong> (Creil, La Chapelle, Saint-Denis, Mitry...), le bouton + propose toutes les branches disponibles. L'utilisateur peut en sélectionner une ou plusieurs selon le contexte de l'incident.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title purple">Panneau latéral — Éléments par zone</div>
+      <p>Quand une zone est sélectionnée, le panneau latéral affiche automatiquement tous les éléments cliquables classés par type :</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-content">
+          <div class="mockup-side">
+            <div style="font-size:9px; color:var(--muted); margin-bottom:6px; letter-spacing:1px">AIGUILLES</div>
+            <div class="mockup-item">aig 1</div>
+            <div class="mockup-item danger">aig 17 ●</div>
+            <div class="mockup-item">aig 4241</div>
+            <div style="font-size:9px; color:var(--muted); margin:8px 0 4px; letter-spacing:1px">SIGNAUX</div>
+            <div class="mockup-item">C1815</div>
+            <div class="mockup-item">C1911</div>
+            <div style="font-size:9px; color:var(--muted); margin:8px 0 4px; letter-spacing:1px">PN</div>
+            <div class="mockup-item">PN 8 (SAL2)</div>
+          </div>
+          <div class="mockup-main">
+            <div class="mockup-schema-hint">Schéma vectoriel zone Creil<br>aig 17 entourée en rouge</div>
+            <div class="mockup-zoom">🔍 aig 17<br>zoom détail</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px; font-size:12px; color:var(--muted)">Cliquer sur un élément dans la liste → cercle rouge sur le schéma sans changer la vue principale + fenêtre de zoom détaillé en incrustation avec les métadonnées (gare, ligne, PK, secteur, poste).</p>
+    </div>
+  </div>
+
+  <!-- 04 SCHEMA VECTORIEL -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <span class="section-title">Schéma vectoriel & Fenêtre de zoom</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">Rendu PDF.js — Qualité native</div>
+      <p>Le schéma EIC Paris Nord est un PDF vectoriel (460cm × 90cm). L'app utilise <strong>PDF.js</strong> pour rendre ce PDF directement dans un canvas HTML, en recalculant les vecteurs à chaque niveau de zoom. Résultat : aussi net que le viewer PDF original, jusqu'aux numéros d'aiguilles et aux PKs détaillés.</p>
+      <div class="code-block">
+        <span class="cm">// Ancien système — flou dès ×2</span><br>
+        PDF vectoriel → PNG 80dpi → JPEG compressé → zoom CSS <span class="cv">← pixels agrandis</span><br><br>
+        <span class="cm">// Nouveau système — net à ×50</span><br>
+        PDF vectoriel → <span class="ck">PDF.js canvas</span> → re-render vectoriel à chaque zoom <span class="cv">← toujours net</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Fenêtre de zoom flottante</div>
+      <p>La vue principale reste fixe sur la zone de situation (exportable). Une petite fenêtre flottante et déplaçable s'ouvre sur l'élément sélectionné — zoom haute résolution + métadonnées Supabase. La vue principale ne bouge jamais.</p>
+      <div class="code-block">
+┌──────────────────────────────────────────────────┐<br>
+│  VUE PRINCIPALE — Zone Creil  <span class="cm">(fixe · exportable)</span>  │<br>
+│                                                  │<br>
+│  Chantilly ──<span class="cv">⊗ aig17</span>── Creil ──── Longueuil      │<br>
+│              <span class="ck">◉ C1815</span>                               │<br>
+│                                                  │<br>
+│  <span class="cs">┌─────────────────────┐</span>                           │<br>
+│  <span class="cs">│  ZOOM · aig 17   ×  │</span>                           │<br>
+│  <span class="cs">│  [vectoriel détail] │</span>                           │<br>
+│  <span class="cs">│  Gare  : Creil      │</span>                           │<br>
+│  <span class="cs">│  PK    : Km 55,618  │</span>                           │<br>
+│  <span class="cs">│  PRCI  : Poste 17   │</span>                           │<br>
+│  <span class="cs">└─────────────────────┘</span>                           │<br>
+└──────────────────────────────────────────────────┘
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 TRAINS -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <span class="section-title">Représentation des trains sur le schéma</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title orange">3 statuts de train à représenter</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Statut</th><th>Symbole</th><th>Données requises</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="key">Immobilisé suite incident</td>
+            <td style="color:var(--danger)">✕ croix rouge</td>
+            <td>N° train · PK exact · sens pair/impair</td>
+          </tr>
+          <tr>
+            <td class="key">Retenu à quai</td>
+            <td style="color:var(--warn)">⏸ carré orange</td>
+            <td>N° train · gare · voie</td>
+          </tr>
+          <tr>
+            <td class="key">Arrêté pleine voie</td>
+            <td style="color:var(--purple)">◆ losange violet</td>
+            <td>N° train · PK · entre quelles gares</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px; font-size:12px; color:var(--muted)">Chaque symbole est éditable et supprimable au fil de l'évolution de la situation. Le numéro de train est affiché à côté du symbole sur le schéma exporté.</p>
+    </div>
+  </div>
+
+  <!-- 06 ANNOTATIONS -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <span class="section-title">Annotations & Symboles d'incident</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title danger">Éléments défaillants</div>
+      <p>Cliquer sur un élément dans la liste latérale ou directement sur le schéma → l'élément est automatiquement entouré en rouge. L'utilisateur tape son message d'annotation qui s'affiche ancré à l'élément :</p>
+      <div class="code-block">
+        <span class="cm">Exemple :</span><br>
+        <span class="cv">aig 17</span> entourée + message : <span class="ck">"absence de contrôle directoire de droite"</span><br>
+        <span class="cv">PN 8</span>    entouré  + message : <span class="ck">"PN en dérangement · barrières non abaissées"</span><br>
+        <span class="cv">C2411</span>   entouré  + message : <span class="ck">"signal carré fermé · cause inconnue"</span>
+      </div>
+      <p>Plusieurs éléments peuvent être annotés simultanément sur le même schéma de situation.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title orange">Indicateur de voie impactée</div>
+      <p>Sélectionner deux points sur le schéma (ou saisir deux PKs) → une surbrillance colorée est tracée sur la portion de voie entre ces points :</p>
+      <div class="code-block">
+        <span class="cv">Rouge</span>   → voie coupée / bloquée<br>
+        <span class="cv">Orange</span>  → ralentissement / limitation de vitesse<br>
+        <span class="cv">Vert</span>    → voie libérée (retour à la normale)
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Dessin libre</div>
+      <p>Mode crayon libre pour ajouter des annotations manuelles sur le schéma — flèches, zones, texte libre — pour les situations non couvertes par les symboles standards.</p>
+    </div>
+  </div>
+
+  <!-- 07 TEMPLATES -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <span class="section-title">Templates de situations types</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">Principe</div>
+      <p>Au lieu de construire le schéma depuis zéro, l'utilisateur sélectionne un template qui pré-configure automatiquement les symboles, couleurs et messages standards. Il n'a plus qu'à renseigner les variables spécifiques (N° train, PK, élément concerné).</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-name">🚆 Train immobilisé pleine voie</div>
+        <div class="feature-desc">Croix rouge + voie colorée + demande N° train et PK</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">⚙ Aiguille défaillante</div>
+        <div class="feature-desc">Cercle rouge sur aiguille + champ message + voie impactée</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">🚦 Signal en dérangement</div>
+        <div class="feature-desc">Cercle rouge sur signal + statut (carré / sémaphore...)</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">🚧 PN en dérangement</div>
+        <div class="feature-desc">PN entouré + message + alerte trafic routier</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">⚡ Incident caténaire</div>
+        <div class="feature-desc">Zone colorée + tronçon impacté + sens</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">🆘 Accident personne</div>
+        <div class="feature-desc">Marqueur + voie coupée + périmètre de sécurité</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">⏱ Ralentissement / LTV</div>
+        <div class="feature-desc">Voie orange + vitesse limite + bornes kilométriques</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-name">🔴 Voie occupée / canton</div>
+        <div class="feature-desc">Canton coloré rouge + occupation détaillée</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 08 EXPORT -->
+  <div class="section" id="s8">
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <span class="section-title">Export vers Durandal</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">Ce que contient l'image exportée</div>
+      <ul class="clean" style="margin-top:8px">
+        <li>Le schéma vectoriel de la zone avec tous les éléments annotés</li>
+        <li>Les symboles trains positionnés (immobilisés, retenus à quai, pleine voie)</li>
+        <li>Les éléments défaillants entourés en rouge avec leurs messages</li>
+        <li>L'indicateur de voie impactée coloré</li>
+        <li>Un bandeau automatique : date · heure · zone · lignes impactées</li>
+        <li>Un chronomètre d'incident : heure de début · durée écoulée</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Modes d'export</div>
+      <p><strong style="color:var(--accent2)">Copie presse-papier</strong> — un clic, l'image est prête à coller directement dans Durandal.</p>
+      <p style="margin-top:6px"><strong style="color:var(--accent2)">Téléchargement PNG</strong> — fichier horodaté, nommé automatiquement.</p>
+      <p style="margin-top:6px"><strong style="color:var(--accent2)">Sauvegarde automatique</strong> — chaque export est archivé dans Supabase avec toutes les métadonnées pour les REX et enquêtes ultérieures.</p>
+    </div>
+  </div>
+
+  <!-- 09 ARCHITECTURE -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <span class="section-num">09</span>
+      <span class="section-title">Architecture technique</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title blue">Stack technologique</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Composant</th><th>Technologie</th><th>Rôle</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="key">Frontend</td><td class="type">HTML / JS / CSS</td><td class="desc">Interface, viewer PDF, éditeur de schéma</td></tr>
+          <tr><td class="key">Rendu PDF</td><td class="type">PDF.js (Mozilla)</td><td class="desc">Rendu vectoriel natif dans canvas HTML</td></tr>
+          <tr><td class="key">Base de données</td><td class="type">Supabase (Postgres)</td><td class="desc">Gares, éléments infra, PK, incidents</td></tr>
+          <tr><td class="key">Temps réel</td><td class="type">Supabase Realtime</td><td class="desc">Synchronisation multi-postes</td></tr>
+          <tr><td class="key">Stockage PDF</td><td class="type">Supabase Storage</td><td class="desc">Hébergement du schéma EIC</td></tr>
+          <tr><td class="key">Export</td><td class="type">Canvas API / html2canvas</td><td class="desc">Génération image + clipboard</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">Structure base de données Supabase</div>
+      <div class="code-block">
+<span class="ck">gares</span>              id · nom · nom_court · zone_id · x_pct · y_pct<br>
+<span class="ck">pk_lignes</span>          gare_id · ligne · pk · voie<br>
+<span class="ck">sequence_lignes</span>    ligne · ordre · gare_id · pk · type_noeud<br>
+<span class="ck">bifurcations</span>       noeud_id · branches[ ] · ligne · direction<br><br>
+<span class="ck">elements_infra</span>     id · type · identifiant · gare_id · ligne<br>
+                   pk · secteur · poste · x_pct · y_pct · zone_id<br><br>
+<span class="ck">incidents</span>          id · element_id · gare_id · ligne · pk<br>
+                   type · description · trains[ ] · timestamp<br>
+                   auteur · image_url · schema_json<br><br>
+<span class="cm">-- types d'éléments : aiguille | signal | PN | cv | poste | gare</span>
+      </div>
+    </div>
+
+    <div class="warn-box">
+      <strong>Point critique :</strong> Le remplissage initial de la table <code>elements_infra</code> est le principal investissement en temps. Une extraction automatique depuis le PDF est possible (pdfplumber récupère tous les textes avec leurs coordonnées XY), mais la validation métier — associer chaque identifiant à son secteur, sa ligne, son poste — nécessite la connaissance terrain du régulateur.
+    </div>
+  </div>
+
+  <!-- 10 FAISABILITE -->
+  <div class="section" id="s10">
+    <div class="section-header">
+      <span class="section-num">10</span>
+      <span class="section-title">Faisabilité & Roadmap</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title green">Évaluation par fonctionnalité</div>
+      <div style="margin-top:8px">
+
+        <div class="diff-row">
+          <span class="diff-label">Viewer PDF vectoriel (PDF.js)</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot"></div>
+          </div>
+          <span class="diff-tag easy">Facile</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Overlays zones + navigation</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot"></div>
+          </div>
+          <span class="diff-tag easy">Facile</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Annotations + symboles trains + export</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot fill-green"></div>
+            <div class="diff-dot fill-green"></div>
+          </div>
+          <span class="diff-tag easy">Facile</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Recherche gares + PKs (Supabase)</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot"></div>
+          </div>
+          <span class="diff-tag medium">Moyen</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Navigation contextuelle + boutons +</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot"></div>
+          </div>
+          <span class="diff-tag medium">Moyen</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Gestion des bifurcations multi-branches</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+          </div>
+          <span class="diff-tag medium">Moyen</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Recherche éléments infra (aig / signal / PN)</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+            <div class="diff-dot fill-orange"></div>
+          </div>
+          <span class="diff-tag medium">Moyen</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Collaboration temps réel multi-postes</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-red"></div>
+            <div class="diff-dot fill-red"></div>
+            <div class="diff-dot"></div>
+          </div>
+          <span class="diff-tag hard">Complexe</span>
+        </div>
+
+        <div class="diff-row">
+          <span class="diff-label">Positionnement précis éléments sur schéma</span>
+          <div class="diff-bar">
+            <div class="diff-dot fill-red"></div>
+            <div class="diff-dot fill-red"></div>
+            <div class="diff-dot fill-red"></div>
+          </div>
+          <span class="diff-tag hard">Complexe</span>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title purple">Roadmap proposée</div>
+      <div class="timeline" style="margin-top:12px">
+
+        <div class="tl-item active">
+          <div class="tl-phase">Phase 1 · ~4 semaines</div>
+          <div class="tl-title">Prototype local fonctionnel</div>
+          <div class="tl-desc">Viewer PDF.js · overlays zones · annotations · symboles trains · export Durandal · recherche basique gares + PKs</div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-phase">Phase 2 · ~6 semaines</div>
+          <div class="tl-title">Intégration Supabase + recherche avancée</div>
+          <div class="tl-desc">Base gares/PKs/éléments · recherche éléments infra avec disambiguation · navigation contextuelle · templates de situation</div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-phase">Phase 3 · ~4 semaines</div>
+          <div class="tl-title">Collaboration temps réel + enrichissement données</div>
+          <div class="tl-desc">Supabase Realtime multi-postes · indicateur voie impactée · fenêtre zoom flottante · historique REX</div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-phase">Phase 4 · continu</div>
+          <div class="tl-title">Enrichissement base de données</div>
+          <div class="tl-desc">Validation et saisie des éléments d'infrastructure par le régulateur · ajustement des positions sur le schéma</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <div class="hb-label">Contrainte principale</div>
+      <p>La vraie limite n'est pas technique mais métier — le remplissage et la validation des données Supabase (séquences de lignes, bifurcations, éléments d'infrastructure avec leurs coordonnées exactes) nécessite la connaissance terrain du régulateur. C'est le plus gros investissement en temps du projet.</p>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="doc-footer">
+    <span>EIC Paris Nord · Outil de Gestion de Crise · Cahier des charges v1.0</span>
+    <span>Mars 2026 · <span>Julian Verhelle</span> · SNCF</span>
+  </div>
+
+</div>
+</body>
+</html>

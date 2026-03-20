@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EIC Paris Nord — Schéma de Situation</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- HEADER -->
+  <header id="header">
+    <div class="header-left">
+      <span class="logo">EIC Paris Nord</span>
+      <span class="separator">·</span>
+      <span class="subtitle">Schéma de Situation</span>
+    </div>
+    <div class="header-center">
+      <input type="text" id="command-bar" placeholder="aig 17 creil absence contrôle..." autocomplete="off" spellcheck="false">
+    </div>
+    <div class="header-clock">
+      <span id="clock"></span>
+      <button id="btn-chrono" title="Démarrer le chronomètre incident">Chrono</button>
+      <span id="chrono" class="hidden"></span>
+    </div>
+    <div class="header-right">
+      <button id="btn-legend" title="Afficher/masquer la légende">Légende</button>
+      <button id="btn-export-png" title="Télécharger PNG">Export</button>
+      <button id="btn-clear" title="Effacer toutes les annotations">Effacer</button>
+      <button id="btn-calibrate" title="Mode calibration — pointer les éléments sur le schéma">Calibrer</button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <div id="main">
+    <!-- PANNEAU LATÉRAL (éléments + outils) -->
+    <aside id="sidebar">
+      <div id="sidebar-top-bar">
+        <button id="btn-settings" title="Paramètres">Paramètres</button>
+      </div>
+      <div id="sidebar-elements-header" class="hidden">
+        <span id="sidebar-zone" class="sidebar-zone"></span>
+      </div>
+      <div id="sidebar-content">
+        <div class="sidebar-section" data-type="signaux">
+          <div class="sidebar-section-title">Signaux</div>
+          <div class="sidebar-section-list" id="list-signaux"></div>
+        </div>
+        <div class="sidebar-section" data-type="pn">
+          <div class="sidebar-section-title">PN</div>
+          <div class="sidebar-section-list" id="list-pn"></div>
+        </div>
+        <div class="sidebar-section" data-type="cv">
+          <div class="sidebar-section-title">CV</div>
+          <div class="sidebar-section-list" id="list-cv"></div>
+        </div>
+        <div class="sidebar-section" data-type="aiguilles">
+          <div class="sidebar-section-title">Aiguilles</div>
+          <div class="sidebar-section-list" id="list-aiguilles"></div>
+        </div>
+        <div class="sidebar-section" data-type="pk">
+          <div class="sidebar-section-title">PK</div>
+          <div class="sidebar-section-list" id="list-pk"></div>
+        </div>
+      </div>
+
+      <!-- Outils d'annotation -->
+      <div id="sidebar-tools">
+        <div class="tools-title">Annotations</div>
+        <div class="tools-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+          <button class="tool-btn" data-tool="train-immobilise" title="Train immobilisé">
+            <span class="tool-icon" style="color:#ff4040">✕</span>
+            <span class="tool-label">Immobilisé</span>
+          </button>
+          <button class="tool-btn" data-tool="train-retenu" title="Train retenu à quai">
+            <span class="tool-icon" style="color:#ff9520">⏸</span>
+            <span class="tool-label">Retenu</span>
+          </button>
+          <button class="tool-btn" data-tool="train-arrete" title="Train arrêté pleine voie">
+            <span class="tool-icon" style="color:#9060ff">◆</span>
+            <span class="tool-label">Arrêté PV</span>
+          </button>
+          <button class="tool-btn" data-tool="obstacle" title="Obstacle">
+            <span class="tool-icon" style="color:#ff9520">▲</span>
+            <span class="tool-label">Obstacle</span>
+          </button>
+          <button class="tool-btn" data-tool="danger" title="Danger">
+            <span class="tool-icon" style="color:#ff4040">⚠</span>
+            <span class="tool-label">Danger</span>
+          </button>
+          <button class="tool-btn" data-tool="voie-coupee" title="Voie coupée (2 clics)">
+            <span class="tool-icon" style="color:#ff4040">━</span>
+            <span class="tool-label">V. coupée</span>
+          </button>
+          <button class="tool-btn" data-tool="ralentissement" title="Ralentissement (2 clics)">
+            <span class="tool-icon" style="color:#ff9520">━</span>
+            <span class="tool-label">Ralenti</span>
+          </button>
+          <button class="tool-btn" data-tool="voie-libre" title="Voie libérée (2 clics)">
+            <span class="tool-icon" style="color:#00d4a0">━</span>
+            <span class="tool-label">Libérée</span>
+          </button>
+          <button class="tool-btn" data-tool="catenaire" title="Absence de tension / caténaire (2 clics)">
+            <span class="tool-icon" style="color:#3080ff">━</span>
+            <span class="tool-label">Caténaire</span>
+          </button>
+          <button class="tool-btn" data-tool="magicwand" title="Baguette magique — sélectionner une forme par couleur">
+            <span class="tool-icon" style="color:#9060ff">✦</span>
+            <span class="tool-label">Baguette</span>
+          </button>
+          <button class="tool-btn" data-tool="draw" title="Dessin libre">
+            <span class="tool-icon">✏</span>
+            <span class="tool-label">Dessin</span>
+          </button>
+          <button class="tool-btn" data-tool="text" title="Texte libre">
+            <span class="tool-icon">T</span>
+            <span class="tool-label">Texte</span>
+          </button>
+        </div>
+        <!-- Annotations custom -->
+        <div id="custom-tools"></div>
+        <button id="btn-add-custom" title="Créer une annotation personnalisée">+ Créer annotation</button>
+      </div>
+    </aside>
+    <button id="sidebar-toggle" title="Réduire / Agrandir">◂</button>
+
+    <!-- VIEWER PRINCIPAL -->
+    <div id="viewer-wrapper">
+      <!-- OpenSeadragon container -->
+      <div id="viewer-container">
+        <div id="osd-viewer"></div>
+        <!-- Contrôles de zoom -->
+        <div id="zoom-controls">
+          <button id="zoom-in" title="Zoom +">+</button>
+          <span id="zoom-level">100%</span>
+          <button id="zoom-out" title="Zoom −">−</button>
+          <button id="zoom-fit" title="Vue complète">⟲</button>
+        </div>
+        <div id="export-banner" class="hidden">
+          <span id="banner-date"></span>
+          <span id="banner-zone"></span>
+          <span id="banner-lignes"></span>
+        </div>
+      </div>
+
+      <!-- Légende draggable -->
+      <div id="legend-panel" class="hidden">
+        <div id="legend-header">
+          <span id="legend-title">Légende</span>
+          <button id="legend-close">×</button>
+        </div>
+        <div id="legend-content"></div>
+      </div>
+
+      <!-- Barre de secteurs horizontale -->
+      <div id="sectors-bar">
+        <div id="sectors-resize-handle"></div>
+        <button id="sectors-toggle" title="Réduire / Agrandir">▾</button>
+        <div id="sectors-tabs"></div>
+        <div id="sectors-content"></div>
+        <button id="btn-add-zone" title="Ajouter">+</button>
+      </div>
+
+      <!-- Fenêtre de zoom flottante -->
+      <div id="zoom-popup" class="hidden">
+        <div id="zoom-popup-header">
+          <span id="zoom-popup-title">Zoom</span>
+          <button id="zoom-popup-close">×</button>
+        </div>
+        <div id="zoom-popup-viewer"></div>
+        <div id="zoom-popup-meta">
+          <div class="meta-row"><span class="meta-label">Gare</span><span id="meta-gare">—</span></div>
+          <div class="meta-row"><span class="meta-label">PK</span><span id="meta-pk">—</span></div>
+          <div class="meta-row"><span class="meta-label">Ligne</span><span id="meta-ligne">—</span></div>
+          <div class="meta-row"><span class="meta-label">Secteur</span><span id="meta-secteur">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PARAMÈTRES POPUP (sans overlay, non-bloquant) -->
+  <div id="settings-popup" class="hidden">
+    <div class="settings-popup-content">
+      <div class="popup-header">
+        <span class="popup-title">Paramètres</span>
+        <div id="settings-tabs">
+          <button class="settings-tab active" data-tab="dessertes">Dessertes</button>
+          <button class="settings-tab" data-tab="pn">PN</button>
+          <button class="settings-tab" data-tab="lignes">Lignes</button>
+          <button class="settings-tab" data-tab="tables">Tables</button>
+        </div>
+        <button class="popup-close" id="settings-close">×</button>
+      </div>
+      <div id="settings-content"></div>
+    </div>
+  </div>
+
+  <!-- CALIBRATION POPUP -->
+  <div id="calibrate-popup" class="hidden">
+    <div class="popup-overlay"></div>
+    <div class="popup-content popup-small">
+      <div class="popup-header">
+        <span class="popup-title">Identifier cet élément</span>
+        <button class="popup-close" id="calibrate-close">×</button>
+      </div>
+      <div class="custom-form">
+        <label class="custom-label">Coordonnées</label>
+        <div id="calibrate-coords" style="font-family:var(--mono);font-size:11px;color:var(--accent2);padding:4px 0;"></div>
+
+        <label class="custom-label">Type</label>
+        <select id="calibrate-type" style="width:100%;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;">
+          <option value="aiguille">Aiguille</option>
+          <option value="signal">Signal</option>
+          <option value="pn">PN</option>
+          <option value="cv">CV</option>
+          <option value="gare">Gare</option>
+          <option value="pk">PK</option>
+          <option value="poste">Poste</option>
+          <option value="autre">Autre</option>
+        </select>
+
+        <label class="custom-label">Identifiant</label>
+        <input type="text" id="calibrate-id" placeholder="Ex: aig 17, C2411, PN 8..." autocomplete="off">
+
+        <label class="custom-label">Desserte associée</label>
+        <div class="calibrate-gare-wrapper">
+          <input type="text" id="calibrate-gare" placeholder="Ex: Creil" autocomplete="off">
+          <div id="calibrate-gare-dropdown" class="calibrate-dropdown hidden"></div>
+        </div>
+
+        <label class="custom-label">Ligne</label>
+        <input type="text" id="calibrate-ligne" list="calibrate-ligne-list" placeholder="Ex: Paris-Amiens" autocomplete="off">
+        <datalist id="calibrate-ligne-list"></datalist>
+
+        <label class="custom-label">PK</label>
+        <input type="text" id="calibrate-pk" placeholder="Ex: 55,618" autocomplete="off">
+
+        <label class="custom-label">Secteur / Poste</label>
+        <input type="text" id="calibrate-secteur" placeholder="Ex: Poste 50" autocomplete="off">
+
+        <button id="calibrate-save-view" class="btn-secondary">📌 Enregistrer la vue</button>
+        <button id="calibrate-confirm" class="btn-primary">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUSTOM ANNOTATION POPUP -->
+  <div id="custom-annotation-popup" class="hidden">
+    <div class="popup-overlay"></div>
+    <div class="popup-content popup-small">
+      <div class="popup-header">
+        <span class="popup-title">Nouvelle annotation</span>
+        <button class="popup-close" id="custom-close">×</button>
+      </div>
+      <div class="custom-form">
+        <label class="custom-label">Nom</label>
+        <input type="text" id="custom-name" placeholder="Ex: Personne sur les voies" autocomplete="off">
+
+        <label class="custom-label">Symbole</label>
+        <div class="custom-symbol-picker" id="custom-symbol-picker">
+          <button class="symbol-opt" data-symbol="●">●</button>
+          <button class="symbol-opt" data-symbol="▲">▲</button>
+          <button class="symbol-opt" data-symbol="■">■</button>
+          <button class="symbol-opt" data-symbol="◆">◆</button>
+          <button class="symbol-opt" data-symbol="★">★</button>
+          <button class="symbol-opt" data-symbol="✕">✕</button>
+          <button class="symbol-opt" data-symbol="⚠">⚠</button>
+          <button class="symbol-opt" data-symbol="⛔">⛔</button>
+          <button class="symbol-opt" data-symbol="🔥">🔥</button>
+          <button class="symbol-opt" data-symbol="⚡">⚡</button>
+          <button class="symbol-opt" data-symbol="💧">💧</button>
+          <button class="symbol-opt" data-symbol="🚧">🚧</button>
+          <button class="symbol-opt" data-symbol="🚂">🚂</button>
+          <button class="symbol-opt" data-symbol="👤">👤</button>
+          <button class="symbol-opt" data-symbol="📍">📍</button>
+          <button class="symbol-opt" data-symbol="⊘">⊘</button>
+        </div>
+        <input type="text" id="custom-symbol-text" placeholder="Ou tapez un symbole/emoji" maxlength="2">
+
+        <label class="custom-label">Couleur</label>
+        <div class="custom-color-picker" id="custom-color-picker">
+          <button class="color-opt" data-color="#ff4040" style="background:#ff4040"></button>
+          <button class="color-opt" data-color="#ff9520" style="background:#ff9520"></button>
+          <button class="color-opt" data-color="#ffdd00" style="background:#ffdd00"></button>
+          <button class="color-opt" data-color="#00d4a0" style="background:#00d4a0"></button>
+          <button class="color-opt" data-color="#3080ff" style="background:#3080ff"></button>
+          <button class="color-opt" data-color="#9060ff" style="background:#9060ff"></button>
+          <button class="color-opt" data-color="#ff40a0" style="background:#ff40a0"></button>
+          <button class="color-opt" data-color="#ffffff" style="background:#ffffff"></button>
+        </div>
+
+        <label class="custom-label">Type de placement</label>
+        <div class="custom-placement" id="custom-placement">
+          <button class="placement-opt active" data-placement="point">1 clic</button>
+          <button class="placement-opt" data-placement="line">2 clics (ligne)</button>
+        </div>
+
+        <div class="custom-preview" id="custom-preview">
+          <span id="preview-symbol" style="font-size:24px">●</span>
+          <span id="preview-name">Annotation</span>
+        </div>
+
+        <button id="custom-confirm" class="btn-primary">Créer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DISAMBIGUATION POPUP -->
+  <div id="disambiguation-popup" class="hidden">
+    <div class="popup-overlay"></div>
+    <div class="popup-content">
+      <div class="popup-header">
+        <span class="popup-title">Plusieurs résultats</span>
+        <button class="popup-close" id="disambiguation-close">×</button>
+      </div>
+      <div id="disambiguation-list"></div>
+    </div>
+  </div>
+
+  <!-- TRAIN NUMBER INPUT -->
+  <div id="train-input-popup" class="hidden">
+    <div class="popup-overlay"></div>
+    <div class="popup-content popup-small">
+      <div class="popup-header">
+        <span class="popup-title">Numéro de train</span>
+        <button class="popup-close" id="train-input-close">×</button>
+      </div>
+      <input type="text" id="train-number" placeholder="Ex: 67432" autocomplete="off">
+      <button id="train-input-confirm" class="btn-primary">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<!-- LIBS CDN -->
+<script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.1/build/openseadragon/openseadragon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+
+<!-- APP -->
+<script src="js/sync.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/data.js"></script>
+<script src="js/viewer.js"></script>
+<script src="js/annotations.js"></script>
+<script src="js/search.js"></script>
+<script src="js/templates.js"></script>
+<script src="js/export.js"></script>
+<script src="js/magicwand.js"></script>
+<script src="js/calibrate.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Vercel
+.vercel
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude
+.claude/

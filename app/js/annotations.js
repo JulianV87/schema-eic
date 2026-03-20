@@ -1,0 +1,1508 @@
+/**
+ * Système d'annotations sur le schéma
+ * Utilise un canvas overlay synchronisé avec OpenSeadragon
+ */
+const Annotations = (() => {
+  let annotations = [];
+  let activeTool = null;
+  let nextId = 1;
+
+  // Undo/Redo stacks
+  let undoStack = [];
+  let redoStack = [];
+  const MAX_UNDO = 50;
+
+  function pushUndo() {
+    undoStack.push(JSON.stringify(annotations));
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    redoStack = []; // Toute nouvelle action efface le redo
+  }
+
+  function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(JSON.stringify(annotations));
+    annotations = JSON.parse(undoStack.pop());
+    nextId = annotations.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+    redraw();
+    saveToLocalStorage();
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(JSON.stringify(annotations));
+    annotations = JSON.parse(redoStack.pop());
+    nextId = annotations.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+    redraw();
+    saveToLocalStorage();
+  }
+
+  // Persistance localStorage
+  function saveToLocalStorage() {
+    try {
+      localStorage.setItem('eic_annotations', JSON.stringify(annotations));
+      localStorage.setItem('eic_nextId', String(nextId));
+    } catch {}
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem('eic_annotations');
+      if (saved) {
+        annotations = JSON.parse(saved);
+        nextId = parseInt(localStorage.getItem('eic_nextId') || '1', 10);
+        if (isNaN(nextId)) nextId = annotations.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+        redraw();
+      }
+    } catch {}
+  }
+
+  // Types de symboles de train
+  const TRAIN_SYMBOLS = {
+    'train-immobilise': { symbol: '✕', color: '#ff4040', label: 'Immobilisé' },
+    'train-retenu':     { symbol: '⏸', color: '#ff9520', label: 'Retenu à quai' },
+    'train-arrete':     { symbol: '◆', color: '#9060ff', label: 'Arrêté PV' },
+  };
+
+  // Annotations personnalisées (chargées depuis localStorage)
+  let customAnnotations = [];
+
+  function loadCustomAnnotations() {
+    try {
+      const saved = localStorage.getItem('eic_custom_annotations');
+      if (saved) customAnnotations = JSON.parse(saved);
+    } catch {}
+  }
+
+  function saveCustomAnnotations() {
+    try {
+      localStorage.setItem('eic_custom_annotations', JSON.stringify(customAnnotations));
+    } catch {}
+  }
+
+  /**
+   * Calculer le prochain numéro pour un type de tool donné
+   */
+  function getNextNumber(tool) {
+    const existing = annotations.filter(a => a.tool === tool);
+    if (existing.length === 0) return 1;
+    return Math.max(...existing.map(a => a.number || 0)) + 1;
+  }
+
+  // Couleurs des lignes de voie
+  const VOIE_COLORS = {
+    'voie-coupee':     '#ff4040',
+    'ralentissement':  '#ff9520',
+    'voie-libre':      '#00d4a0',
+    'catenaire':       '#3080ff',
+  };
+
+  // Symboles ponctuels
+  const MARKER_SYMBOLS = {
+    'obstacle': { symbol: '▲', color: '#ff9520', label: 'Obstacle' },
+    'danger':   { symbol: '⚠', color: '#ff4040', label: 'Danger' },
+  };
+
+  // Outils qui nécessitent 2 clics (point A → point B)
+  const TWO_POINT_TOOLS = ['voie-coupee', 'ralentissement', 'voie-libre', 'catenaire'];
+
+  // État pour les outils à 2 clics
+  let pendingFirstPoint = null;
+
+  // État pour le dessin libre
+  let isDrawing = false;
+  let drawPoints = [];
+
+  function init() {
+    // Charger annotations sauvegardées
+    loadFromLocalStorage();
+
+    // Ctrl+Z / Ctrl+Y
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+    });
+
+    // Bind tool buttons
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.dataset.tool;
+        setActiveTool(tool === activeTool ? null : tool);
+      });
+    });
+
+    // Clic sur le viewer → placer annotation
+    const viewer = Viewer.getMainViewer();
+
+    viewer.addHandler('canvas-click', (event) => {
+      if (!activeTool) return;
+      if (activeTool === 'magicwand') return;
+      if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
+      event.preventDefaultAction = true;
+
+      const viewportPoint = viewer.viewport.pointFromPixel(event.position);
+
+      // Outils train
+      if (TRAIN_SYMBOLS[activeTool]) {
+        promptTrainNumber((trainNumber) => {
+          addTrainAnnotation(activeTool, viewportPoint.x, viewportPoint.y, trainNumber);
+        });
+      }
+      // Outils ligne à 2 points (voie coupée, ralentissement, libérée, caténaire)
+      else if (TWO_POINT_TOOLS.includes(activeTool)) {
+        if (!pendingFirstPoint) {
+          // Premier clic → stocker le point A
+          pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
+          showStatusMessage('Cliquez le 2ème point');
+        } else {
+          // Deuxième clic → tracer la ligne
+          addLineAnnotation(activeTool, pendingFirstPoint.x, pendingFirstPoint.y, viewportPoint.x, viewportPoint.y);
+          pendingFirstPoint = null;
+          hideStatusMessage();
+        }
+      }
+      // Marqueurs ponctuels (obstacle, danger)
+      else if (MARKER_SYMBOLS[activeTool]) {
+        addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
+      }
+      // Texte libre
+      else if (activeTool === 'text') {
+        const text = prompt('Texte :');
+        if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
+      }
+      // Annotations custom
+      else if (activeTool && activeTool.startsWith('custom-')) {
+        const idx = parseInt(activeTool.replace('custom-', ''), 10);
+        const custom = customAnnotations[idx];
+        if (!custom) return;
+
+        if (custom.placement === 'line') {
+          if (!pendingFirstPoint) {
+            pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
+            showStatusMessage('Cliquez le 2ème point');
+          } else {
+            addLineAnnotation(activeTool, pendingFirstPoint.x, pendingFirstPoint.y, viewportPoint.x, viewportPoint.y);
+            // Override label et color avec le custom
+            const lastAnnot = annotations[annotations.length - 1];
+            lastAnnot.label = custom.name;
+            lastAnnot.color = custom.color;
+            lastAnnot.symbol = custom.symbol;
+            pendingFirstPoint = null;
+            hideStatusMessage();
+            redraw();
+          }
+        } else {
+          addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, custom.name);
+          // Override avec les propriétés custom
+          const lastAnnot = annotations[annotations.length - 1];
+          lastAnnot.symbol = custom.symbol;
+          lastAnnot.color = custom.color;
+          lastAnnot.label = custom.name;
+          redraw();
+        }
+      }
+    });
+
+    // Dessin libre — mouse events sur le canvas d'annotations
+    const viewerEl = document.getElementById('osd-viewer');
+
+    viewer.addHandler('canvas-press', (event) => {
+      if (activeTool !== 'draw') return;
+      event.preventDefaultAction = true;
+      isDrawing = true;
+      const vp = viewer.viewport.pointFromPixel(event.position);
+      drawPoints = [{ x: vp.x, y: vp.y }];
+    });
+
+    viewer.addHandler('canvas-drag', (event) => {
+      if (!isDrawing || activeTool !== 'draw') return;
+      event.preventDefaultAction = true;
+      const vp = viewer.viewport.pointFromPixel(event.position);
+      drawPoints.push({ x: vp.x, y: vp.y });
+      redraw();
+      // Dessiner le trait en cours
+      drawLiveStroke();
+    });
+
+    viewer.addHandler('canvas-release', (event) => {
+      if (!isDrawing || activeTool !== 'draw') return;
+      isDrawing = false;
+      if (drawPoints.length > 2) {
+        addFreeDrawAnnotation(drawPoints);
+      }
+      drawPoints = [];
+      redraw();
+    });
+
+    // Clic droit sur le viewer container → menu contextuel complet
+    const viewerContainer = document.getElementById('viewer-container');
+    viewerContainer.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      closeContextMenu();
+
+      const viewer = Viewer.getMainViewer();
+      const viewerEl = document.getElementById('osd-viewer');
+      const rect = viewerEl.getBoundingClientRect();
+      const pixel = new OpenSeadragon.Point(e.clientX - rect.left, e.clientY - rect.top);
+      const viewportPoint = viewer.viewport.pointFromPixel(pixel);
+
+      showMainContextMenu(e.clientX, e.clientY, viewportPoint);
+    });
+
+    // Fermer le menu contextuel au clic ailleurs
+    document.addEventListener('click', closeContextMenu);
+  }
+
+  function setActiveTool(tool) {
+    // Désactiver la baguette magique et le mode calibration si on change d'outil
+    if (activeTool === 'magicwand' && tool !== 'magicwand') {
+      MagicWand.setActive(false);
+    }
+    if (typeof Calibrate !== 'undefined' && Calibrate.isActive() && tool) {
+      // Désactiver le mode calibration
+      const calBtn = document.getElementById('btn-calibrate');
+      if (calBtn) { calBtn.classList.remove('active'); calBtn.click(); }
+    }
+
+    activeTool = tool;
+    pendingFirstPoint = null;
+    isDrawing = false;
+    drawPoints = [];
+    hideStatusMessage();
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tool === tool);
+    });
+
+    // Activer la baguette magique
+    if (tool === 'magicwand') {
+      MagicWand.setActive(true);
+    }
+
+    const osd = document.getElementById('osd-viewer');
+    osd.style.cursor = tool ? 'crosshair' : '';
+  }
+
+  function getActiveTool() { return activeTool; }
+
+  function showStatusMessage(msg) {
+    let el = document.getElementById('status-message');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'status-message';
+      el.style.cssText = `position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:30;
+        background:rgba(48,128,255,0.9); color:#fff; font-family:'JetBrains Mono',monospace;
+        font-size:11px; padding:4px 14px; border-radius:4px; pointer-events:none;`;
+      document.getElementById('viewer-container').appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideStatusMessage() {
+    const el = document.getElementById('status-message');
+    if (el) el.style.display = 'none';
+  }
+
+  /**
+   * Ajouter un cercle rouge sur un élément infra
+   */
+  function highlightElement(element, message) {
+    const annotation = {
+      id: nextId++,
+      type: 'element-highlight',
+      x: element.x_pct,
+      y: element.y_pct,
+      elementId: element.id,
+      identifiant: element.identifiant,
+      message: message || '',
+      color: '#ff4040',
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+
+    // Marquer dans le sidebar
+    const sidebarItem = document.querySelector(`.sidebar-item[data-id="${element.id}"]`);
+    if (sidebarItem) sidebarItem.classList.add('annotated');
+
+    return annotation;
+  }
+
+  /**
+   * Ajouter un symbole de train
+   */
+  function addTrainAnnotation(tool, x, y, trainNumber) {
+    const config = TRAIN_SYMBOLS[tool];
+    const num = getNextNumber(tool);
+    const annotation = {
+      id: nextId++,
+      type: 'train',
+      tool: tool,
+      number: num,
+      x: x,
+      y: y,
+      trainNumber: trainNumber,
+      symbol: config.symbol,
+      color: config.color,
+      label: config.label,
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Ajouter un texte libre
+   */
+  function addTextAnnotation(x, y, text) {
+    const annotation = {
+      id: nextId++,
+      type: 'text',
+      x: x,
+      y: y,
+      text: text,
+      color: '#ffffff',
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Ajouter un marqueur générique
+   */
+  function addMarkerAnnotation(tool, x, y, label) {
+    const config = MARKER_SYMBOLS[tool];
+    const num = getNextNumber(tool);
+    const annotation = {
+      id: nextId++,
+      type: 'marker',
+      tool: tool,
+      number: num,
+      x: x,
+      y: y,
+      symbol: config ? config.symbol : '●',
+      color: config ? config.color : (VOIE_COLORS[tool] || '#ffffff'),
+      label: config ? config.label : (label || tool),
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Ajouter une ligne entre deux points (voie coupée, ralentissement, caténaire...)
+   */
+  function addLineAnnotation(tool, x1, y1, x2, y2) {
+    const labels = {
+      'voie-coupee': 'Voie coupée',
+      'ralentissement': 'Ralentissement',
+      'voie-libre': 'Voie libérée',
+      'catenaire': 'Absence de tension',
+    };
+    const num = getNextNumber(tool);
+    const annotation = {
+      id: nextId++,
+      type: 'line',
+      tool: tool,
+      number: num,
+      x: (x1 + x2) / 2,
+      y: (y1 + y2) / 2,
+      x1: x1, y1: y1,
+      x2: x2, y2: y2,
+      color: VOIE_COLORS[tool] || '#ffffff',
+      label: (labels[tool] || tool) + ' #' + num,
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Ajouter un dessin libre (suite de points)
+   */
+  function addFreeDrawAnnotation(points) {
+    const annotation = {
+      id: nextId++,
+      type: 'freedraw',
+      x: points[0].x,
+      y: points[0].y,
+      points: points.map(p => ({ x: p.x, y: p.y })),
+      color: '#ffffff',
+      label: 'Dessin libre',
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Dessiner le trait en cours pendant le dessin libre
+   */
+  function drawLiveStroke() {
+    if (drawPoints.length < 2) return;
+    const canvas = document.getElementById('annotation-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    const first = Viewer.schemaToScreen(drawPoints[0].x, drawPoints[0].y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < drawPoints.length; i++) {
+      const p = Viewer.schemaToScreen(drawPoints[i].x, drawPoints[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  /**
+   * Menu contextuel principal — clic droit n'importe où
+   */
+  function showMainContextMenu(screenX, screenY, viewportPoint) {
+    const menu = document.createElement('div');
+    menu.id = 'annotation-context-menu';
+    menu.style.cssText = `
+      position:fixed; left:${screenX}px; top:${screenY}px; z-index:300;
+      background:#0c1220; border:1px solid #2a4266; border-radius:6px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.6); overflow:hidden;
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+      min-width:200px; max-height:70vh; overflow-y:auto;
+    `;
+
+    // === SECTION AJOUTER ===
+    const addTitle = document.createElement('div');
+    addTitle.style.cssText = 'padding:6px 12px; color:#00d4a0; font-size:9px; letter-spacing:1px; text-transform:uppercase; border-bottom:1px solid #1e304a;';
+    addTitle.textContent = 'Ajouter ici';
+    menu.appendChild(addTitle);
+
+    const addOptions = [
+      { label: 'Train immobilisé', icon: '✕', color: '#ff4040', tool: 'train-immobilise' },
+      { label: 'Train retenu à quai', icon: '⏸', color: '#ff9520', tool: 'train-retenu' },
+      { label: 'Train arrêté PV', icon: '◆', color: '#9060ff', tool: 'train-arrete' },
+      { label: 'Obstacle', icon: '▲', color: '#ff9520', tool: 'obstacle' },
+      { label: 'Danger', icon: '⚠', color: '#ff4040', tool: 'danger' },
+      { label: 'Voie coupée (2 pts)', icon: '━', color: '#ff4040', tool: 'voie-coupee' },
+      { label: 'Ralentissement (2 pts)', icon: '━', color: '#ff9520', tool: 'ralentissement' },
+      { label: 'Voie libérée (2 pts)', icon: '━', color: '#00d4a0', tool: 'voie-libre' },
+      { label: 'Caténaire (2 pts)', icon: '━', color: '#3080ff', tool: 'catenaire' },
+      { label: 'Texte libre', icon: 'T', color: '#c8daf5', tool: 'text' },
+    ];
+
+    // Ajouter les custom
+    customAnnotations.forEach((custom, i) => {
+      addOptions.push({
+        label: custom.name,
+        icon: custom.symbol,
+        color: custom.color,
+        tool: 'custom-' + i,
+        isCustom: true,
+        placement: custom.placement,
+      });
+    });
+
+    addOptions.forEach(opt => {
+      const item = createMenuItem(opt.icon, opt.label, opt.color, () => {
+        closeContextMenu();
+        if (TRAIN_SYMBOLS[opt.tool]) {
+          promptTrainNumber((num) => {
+            addTrainAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, num);
+          });
+        } else if (TWO_POINT_TOOLS.includes(opt.tool)) {
+          // Activer l'outil et stocker le premier point
+          setActiveTool(opt.tool);
+          pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
+          showStatusMessage('Cliquez le 2ème point pour tracer la ligne');
+        } else if (MARKER_SYMBOLS[opt.tool]) {
+          addMarkerAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, opt.tool);
+        } else if (opt.tool === 'text') {
+          const text = prompt('Texte :');
+          if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
+        } else if (opt.isCustom) {
+          if (opt.placement === 'line') {
+            setActiveTool(opt.tool);
+            pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
+            showStatusMessage('Cliquez le 2ème point pour tracer la ligne');
+          } else {
+            addMarkerAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, opt.label);
+            const lastAnnot = annotations[annotations.length - 1];
+            lastAnnot.symbol = opt.icon;
+            lastAnnot.color = opt.color;
+            lastAnnot.label = opt.label;
+            redraw();
+          }
+        }
+      });
+      menu.appendChild(item);
+    });
+
+    // === SECTION ANNOTATIONS EXISTANTES ===
+    if (annotations.length > 0) {
+      const listTitle = document.createElement('div');
+      listTitle.style.cssText = 'padding:6px 12px; color:#3080ff; font-size:9px; letter-spacing:1px; text-transform:uppercase; border-top:1px solid #1e304a; border-bottom:1px solid #1e304a; margin-top:2px;';
+      listTitle.textContent = `Annotations (${annotations.length})`;
+      menu.appendChild(listTitle);
+
+      annotations.forEach(a => {
+        const label = getAnnotationLabel(a);
+        const icon = getAnnotationIcon(a);
+
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:6px 12px; cursor:pointer; color:#c8daf5; display:flex; align-items:center; justify-content:space-between; gap:8px; transition:background 0.1s;';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.style.cssText = 'display:flex; align-items:center; gap:6px; flex:1; min-width:0; overflow:hidden;';
+        labelSpan.innerHTML = `<span style="color:${a.color || '#c8daf5'}; font-size:13px; flex-shrink:0;">${icon}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+
+        const actions = document.createElement('span');
+        actions.style.cssText = 'display:flex; gap:2px; flex-shrink:0;';
+
+        const editBtn = document.createElement('span');
+        editBtn.textContent = '✎';
+        editBtn.title = 'Modifier';
+        editBtn.style.cssText = 'cursor:pointer; padding:2px 5px; border-radius:3px; color:#3080ff; font-size:12px;';
+        editBtn.addEventListener('mouseenter', () => { editBtn.style.background = '#162038'; });
+        editBtn.addEventListener('mouseleave', () => { editBtn.style.background = 'none'; });
+        editBtn.addEventListener('click', (ev) => { ev.stopPropagation(); closeContextMenu(); editAnnotation(a); });
+
+        const delBtn = document.createElement('span');
+        delBtn.textContent = '✕';
+        delBtn.title = 'Supprimer';
+        delBtn.style.cssText = 'cursor:pointer; padding:2px 5px; border-radius:3px; color:#ff4040; font-size:12px;';
+        delBtn.addEventListener('mouseenter', () => { delBtn.style.background = '#162038'; });
+        delBtn.addEventListener('mouseleave', () => { delBtn.style.background = 'none'; });
+        delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); closeContextMenu(); remove(a.id); });
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+        item.appendChild(labelSpan);
+        item.appendChild(actions);
+
+        item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
+        item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+        item.addEventListener('click', (ev) => { ev.stopPropagation(); closeContextMenu(); Viewer.panTo(a.x, a.y, 8); });
+
+        menu.appendChild(item);
+      });
+
+      // Tout effacer
+      const clearItem = createMenuItem('✕', 'Tout effacer', '#ff4040', () => { closeContextMenu(); clear(); });
+      clearItem.style.borderTop = '1px solid #1e304a';
+      clearItem.style.marginTop = '2px';
+      menu.appendChild(clearItem);
+    }
+
+    document.body.appendChild(menu);
+
+    // S'assurer que le menu reste dans l'écran
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) menu.style.left = (screenX - menuRect.width) + 'px';
+    if (menuRect.bottom > window.innerHeight) menu.style.top = (screenY - menuRect.height) + 'px';
+  }
+
+  function createMenuItem(icon, label, color, action) {
+    const item = document.createElement('div');
+    item.style.cssText = `padding:7px 12px; cursor:pointer; color:${color || '#c8daf5'}; display:flex; align-items:center; gap:8px; transition:background 0.1s;`;
+    item.innerHTML = `<span style="width:14px; text-align:center; font-size:13px;">${icon}</span> ${label}`;
+    item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
+    item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+    item.addEventListener('click', (e) => { e.stopPropagation(); action(); });
+    return item;
+  }
+
+  /**
+   * Menu contextuel sur une annotation (clic droit proche)
+   */
+  function showContextMenu(x, y, annotation) {
+    const menu = document.createElement('div');
+    menu.id = 'annotation-context-menu';
+    menu.style.cssText = `
+      position:fixed; left:${x}px; top:${y}px; z-index:300;
+      background:#0c1220; border:1px solid #2a4266; border-radius:6px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.6); overflow:hidden;
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+    `;
+
+    // Titre
+    const title = document.createElement('div');
+    title.style.cssText = 'padding:6px 12px; color:#4a6a9a; font-size:9px; letter-spacing:1px; text-transform:uppercase; border-bottom:1px solid #1e304a;';
+    title.textContent = annotation.identifiant || annotation.trainNumber || annotation.type;
+    menu.appendChild(title);
+
+    // Options
+    const options = [];
+
+    if (annotation.type === 'train') {
+      options.push({ label: 'Modifier n° train', icon: '✎', action: () => {
+        closeContextMenu();
+        promptTrainNumber((num) => {
+          annotation.trainNumber = num;
+          redraw();
+        });
+      }});
+    }
+
+    if (annotation.type === 'element-highlight') {
+      options.push({ label: 'Modifier message', icon: '✎', action: () => {
+        closeContextMenu();
+        const msg = prompt('Message :', annotation.message || '');
+        if (msg !== null) {
+          annotation.message = msg;
+          redraw();
+        }
+      }});
+    }
+
+    if (annotation.type === 'text') {
+      options.push({ label: 'Modifier texte', icon: '✎', action: () => {
+        closeContextMenu();
+        const txt = prompt('Texte :', annotation.text || '');
+        if (txt !== null) {
+          annotation.text = txt;
+          redraw();
+        }
+      }});
+    }
+
+    // Modifier apparence (pour tous les types sauf freedraw)
+    if (annotation.type !== 'freedraw') {
+      options.push({ label: 'Modifier apparence', icon: '🎨', action: () => {
+        closeContextMenu();
+        showEditAnnotationForm(annotation);
+      }});
+    }
+
+    options.push({ label: 'Supprimer', icon: '✕', color: '#ff4040', action: () => {
+      closeContextMenu();
+      remove(annotation.id);
+    }});
+
+    options.forEach(opt => {
+      const item = document.createElement('div');
+      item.style.cssText = `padding:8px 12px; cursor:pointer; color:${opt.color || '#c8daf5'}; display:flex; align-items:center; gap:8px; transition:background 0.1s;`;
+      item.innerHTML = `<span style="width:14px;text-align:center">${opt.icon}</span> ${opt.label}`;
+      item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+      item.addEventListener('click', (e) => { e.stopPropagation(); opt.action(); });
+      menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+
+    // S'assurer que le menu reste dans l'écran
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) menu.style.left = (x - menuRect.width) + 'px';
+    if (menuRect.bottom > window.innerHeight) menu.style.top = (y - menuRect.height) + 'px';
+  }
+
+  /**
+   * Menu liste de toutes les annotations (clic droit loin d'une annotation)
+   */
+  function showAnnotationListMenu(x, y) {
+    if (annotations.length === 0) return;
+
+    const menu = document.createElement('div');
+    menu.id = 'annotation-context-menu';
+    menu.style.cssText = `
+      position:fixed; left:${x}px; top:${y}px; z-index:300;
+      background:#0c1220; border:1px solid #2a4266; border-radius:6px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.6); overflow:hidden;
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+      max-height:400px; overflow-y:auto;
+    `;
+
+    // Titre
+    const title = document.createElement('div');
+    title.style.cssText = 'padding:6px 12px; color:#4a6a9a; font-size:9px; letter-spacing:1px; text-transform:uppercase; border-bottom:1px solid #1e304a;';
+    title.textContent = `Annotations (${annotations.length})`;
+    menu.appendChild(title);
+
+    // Lister chaque annotation
+    annotations.forEach(a => {
+      const label = getAnnotationLabel(a);
+      const color = a.color || '#c8daf5';
+
+      const item = document.createElement('div');
+      item.style.cssText = `padding:6px 12px; cursor:pointer; color:#c8daf5; display:flex; align-items:center; justify-content:space-between; gap:12px; transition:background 0.1s; border-bottom:1px solid #1e304a;`;
+
+      const labelSpan = document.createElement('span');
+      labelSpan.style.cssText = `display:flex; align-items:center; gap:6px; flex:1; min-width:0;`;
+      labelSpan.innerHTML = `<span style="color:${color}; font-size:14px;">${getAnnotationIcon(a)}</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+
+      const actions = document.createElement('span');
+      actions.style.cssText = 'display:flex; gap:4px; flex-shrink:0;';
+
+      // Bouton éditer
+      const editBtn = document.createElement('span');
+      editBtn.textContent = '✎';
+      editBtn.title = 'Modifier';
+      editBtn.style.cssText = 'cursor:pointer; padding:2px 4px; border-radius:3px; color:#3080ff;';
+      editBtn.addEventListener('mouseenter', () => { editBtn.style.background = '#162038'; });
+      editBtn.addEventListener('mouseleave', () => { editBtn.style.background = 'none'; });
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        editAnnotation(a);
+      });
+
+      // Bouton supprimer
+      const delBtn = document.createElement('span');
+      delBtn.textContent = '✕';
+      delBtn.title = 'Supprimer';
+      delBtn.style.cssText = 'cursor:pointer; padding:2px 4px; border-radius:3px; color:#ff4040;';
+      delBtn.addEventListener('mouseenter', () => { delBtn.style.background = '#162038'; });
+      delBtn.addEventListener('mouseleave', () => { delBtn.style.background = 'none'; });
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        remove(a.id);
+      });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      item.appendChild(labelSpan);
+      item.appendChild(actions);
+
+      // Clic sur la ligne → centrer la vue sur l'annotation
+      item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        Viewer.panTo(a.x, a.y, 8);
+      });
+
+      menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+
+    // S'assurer que le menu reste dans l'écran
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) menu.style.left = (x - menuRect.width) + 'px';
+    if (menuRect.bottom > window.innerHeight) menu.style.top = (y - menuRect.height) + 'px';
+  }
+
+  function getAnnotationLabel(a) {
+    const num = a.number ? ` #${a.number}` : '';
+    switch (a.type) {
+      case 'train': return `${TRAIN_SYMBOLS[a.tool]?.label || 'Train'}${num} — ${a.trainNumber || '?'}`;
+      case 'element-highlight': return `${a.identifiant || 'Element'} ${a.message ? '— ' + a.message : ''}`;
+      case 'text': return a.text || 'Texte';
+      case 'marker': return `${a.label || 'Marqueur'}${num}`;
+      case 'line': return a.label || 'Ligne';
+      case 'freedraw': return 'Dessin libre';
+      default: return 'Annotation';
+    }
+  }
+
+  function getAnnotationIcon(a) {
+    switch (a.type) {
+      case 'train': return TRAIN_SYMBOLS[a.tool]?.symbol || '●';
+      case 'element-highlight': return '⊙';
+      case 'text': return 'T';
+      case 'marker': return a.symbol || '●';
+      case 'line': return '━';
+      case 'freedraw': return '✏';
+      default: return '●';
+    }
+  }
+
+  function editAnnotation(a) {
+    if (a.type === 'train') {
+      promptTrainNumber((num) => { pushUndo(); a.trainNumber = num; redraw(); saveToLocalStorage(); });
+    } else if (a.type === 'element-highlight') {
+      const msg = prompt('Message :', a.message || '');
+      if (msg !== null) { pushUndo(); a.message = msg; redraw(); saveToLocalStorage(); }
+    } else if (a.type === 'text') {
+      const txt = prompt('Texte :', a.text || '');
+      if (txt !== null) { pushUndo(); a.text = txt; redraw(); saveToLocalStorage(); }
+    } else if (a.type === 'marker' || a.type === 'line') {
+      showEditAnnotationForm(a);
+    }
+  }
+
+  /**
+   * Formulaire d'édition avancé pour une annotation (symbole, couleur, label)
+   */
+  function showEditAnnotationForm(a) {
+    const symbols = ['●','▲','■','◆','★','✕','⚠','⛔','🔥','⚡','💧','🚧','🚂','👤','📍','⊘'];
+    const colors = ['#ff4040','#ff9520','#ffdd00','#00d4a0','#3080ff','#9060ff','#ff40a0','#ffffff'];
+
+    let selectedSymbol = a.symbol || '●';
+    let selectedColor = a.color || '#ff4040';
+
+    const menu = document.createElement('div');
+    menu.id = 'annotation-context-menu';
+    menu.style.cssText = `
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:300;
+      background:#0c1220; border:1px solid #2a4266; border-radius:8px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.6);
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+      padding:16px; min-width:250px;
+    `;
+
+    menu.innerHTML = `
+      <div style="color:#4a6a9a;font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Modifier annotation</div>
+      <div style="margin-bottom:8px;">
+        <div style="color:#4a6a9a;font-size:9px;margin-bottom:4px;">NOM</div>
+        <input id="edit-annot-label" type="text" value="${a.label || ''}" style="width:100%;padding:4px 8px;background:#111a2e;border:1px solid #1e304a;border-radius:3px;color:#c8daf5;font-family:inherit;font-size:11px;outline:none;">
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="color:#4a6a9a;font-size:9px;margin-bottom:4px;">SYMBOLE</div>
+        <div id="edit-annot-symbols" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div style="color:#4a6a9a;font-size:9px;margin-bottom:4px;">COULEUR</div>
+        <div id="edit-annot-colors" style="display:flex;gap:4px;"></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button id="edit-annot-save" style="flex:1;padding:6px;background:#00d4a0;border:none;border-radius:4px;color:#06090f;font-family:inherit;font-weight:600;cursor:pointer;">OK</button>
+        <button id="edit-annot-cancel" style="flex:1;padding:6px;background:#111a2e;border:1px solid #1e304a;border-radius:4px;color:#c8daf5;font-family:inherit;cursor:pointer;">Annuler</button>
+      </div>
+    `;
+
+    document.body.appendChild(menu);
+
+    // Symboles
+    const symContainer = document.getElementById('edit-annot-symbols');
+    symbols.forEach(s => {
+      const btn = document.createElement('span');
+      btn.textContent = s;
+      btn.style.cssText = `width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:#111a2e;border:1px solid ${s === selectedSymbol ? '#00d4a0' : '#1e304a'};border-radius:3px;cursor:pointer;font-size:14px;`;
+      btn.addEventListener('click', () => {
+        selectedSymbol = s;
+        symContainer.querySelectorAll('span').forEach(b => b.style.borderColor = '#1e304a');
+        btn.style.borderColor = '#00d4a0';
+      });
+      symContainer.appendChild(btn);
+    });
+
+    // Couleurs
+    const colContainer = document.getElementById('edit-annot-colors');
+    colors.forEach(c => {
+      const btn = document.createElement('span');
+      btn.style.cssText = `width:22px;height:22px;border-radius:50%;background:${c};border:2px solid ${c === selectedColor ? '#fff' : '#1e304a'};cursor:pointer;`;
+      btn.addEventListener('click', () => {
+        selectedColor = c;
+        colContainer.querySelectorAll('span').forEach(b => b.style.borderColor = '#1e304a');
+        btn.style.borderColor = '#fff';
+      });
+      colContainer.appendChild(btn);
+    });
+
+    // Save
+    document.getElementById('edit-annot-save').addEventListener('click', () => {
+      pushUndo();
+      a.symbol = selectedSymbol;
+      a.color = selectedColor;
+      a.label = document.getElementById('edit-annot-label').value.trim() || a.label;
+      menu.remove();
+      redraw();
+      saveToLocalStorage();
+    });
+
+    // Cancel
+    document.getElementById('edit-annot-cancel').addEventListener('click', () => { menu.remove(); });
+  }
+
+  function closeContextMenu() {
+    const existing = document.getElementById('annotation-context-menu');
+    if (existing) existing.remove();
+  }
+
+  /**
+   * Supprimer une annotation
+   */
+  function remove(id) {
+    pushUndo();
+    annotations = annotations.filter(a => a.id !== id);
+    redraw();
+    saveToLocalStorage();
+  }
+
+  /**
+   * Tout effacer
+   */
+  function clear() {
+    pushUndo();
+    annotations = [];
+    document.querySelectorAll('.sidebar-item.annotated').forEach(el => el.classList.remove('annotated'));
+    closeContextMenu();
+    redraw();
+    saveToLocalStorage();
+  }
+
+  /**
+   * Redessiner toutes les annotations sur le canvas overlay
+   */
+  function redraw() {
+    const canvas = document.getElementById('annotation-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    annotations.forEach(a => {
+      const screen = Viewer.schemaToScreen(a.x, a.y);
+
+      switch (a.type) {
+        case 'element-highlight':
+          drawElementHighlight(ctx, screen, a);
+          break;
+        case 'train':
+          drawTrainSymbol(ctx, screen, a);
+          break;
+        case 'text':
+          drawText(ctx, screen, a);
+          break;
+        case 'marker':
+          drawMarker(ctx, screen, a);
+          break;
+        case 'line':
+          drawLine(ctx, a);
+          break;
+        case 'freedraw':
+          drawFreeDraw(ctx, a);
+          break;
+      }
+    });
+  }
+
+  // Polyfill roundRect pour navigateurs anciens
+  function roundRect(ctx, x, y, w, h, r) {
+    if (ctx.roundRect) {
+      ctx.roundRect(x, y, w, h, r);
+    } else {
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+    }
+  }
+
+  function drawElementHighlight(ctx, pos, annotation) {
+    ctx.save();
+    const r = 18;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = annotation.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    if (annotation.message) {
+      ctx.font = '11px "JetBrains Mono", monospace';
+      const metrics = ctx.measureText(annotation.message);
+      const padding = 4;
+      const bgWidth = metrics.width + padding * 2;
+      const bgHeight = 16;
+
+      ctx.fillStyle = 'rgba(255,64,64,0.85)';
+      ctx.beginPath();
+      roundRect(ctx, pos.x + r + 6, pos.y - bgHeight / 2, bgWidth, bgHeight, 3);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(annotation.message, pos.x + r + 6 + padding, pos.y + 4);
+    }
+    ctx.restore();
+  }
+
+  function drawTrainSymbol(ctx, pos, annotation) {
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    // Numéro d'ordre (pastille en haut à droite)
+    if (annotation.number) {
+      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.fillStyle = annotation.color;
+      ctx.beginPath();
+      ctx.arc(pos.x + 14, pos.y - 8, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(String(annotation.number), pos.x + 14, pos.y - 5);
+    }
+
+    // Symbole principal
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = annotation.color;
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(annotation.symbol, pos.x, pos.y + 8);
+    ctx.shadowBlur = 0;
+
+    // Numéro de train en dessous
+    if (annotation.trainNumber) {
+      ctx.font = '10px "JetBrains Mono", monospace';
+      const label = annotation.trainNumber;
+      const metrics = ctx.measureText(label);
+      const padding = 3;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.beginPath();
+      roundRect(ctx, pos.x - metrics.width / 2 - padding, pos.y + 14, metrics.width + padding * 2, 14, 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, pos.x, pos.y + 25);
+    }
+    ctx.restore();
+  }
+
+  function drawText(ctx, pos, annotation) {
+    ctx.save();
+    ctx.font = '12px "JetBrains Mono", monospace';
+    const metrics = ctx.measureText(annotation.text);
+    const padding = 4;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    roundRect(ctx, pos.x - padding, pos.y - 12, metrics.width + padding * 2, 18, 3);
+    ctx.fill();
+
+    ctx.fillStyle = annotation.color;
+    ctx.fillText(annotation.text, pos.x, pos.y);
+    ctx.restore();
+  }
+
+  function drawMarker(ctx, pos, annotation) {
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    // Numéro d'ordre (pastille en haut à droite)
+    if (annotation.number) {
+      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.fillStyle = annotation.color;
+      ctx.beginPath();
+      ctx.arc(pos.x + 14, pos.y - 8, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(String(annotation.number), pos.x + 14, pos.y - 5);
+    }
+
+    // Symbole
+    const symbol = annotation.symbol || '●';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = annotation.color;
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(symbol, pos.x, pos.y + 7);
+    ctx.shadowBlur = 0;
+
+    // Label en dessous
+    if (annotation.label) {
+      ctx.font = '9px "JetBrains Mono", monospace';
+      const metrics = ctx.measureText(annotation.label);
+      const pad = 3;
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.beginPath();
+      roundRect(ctx, pos.x - metrics.width / 2 - pad, pos.y + 14, metrics.width + pad * 2, 13, 2);
+      ctx.fill();
+      ctx.fillStyle = annotation.color;
+      ctx.fillText(annotation.label, pos.x, pos.y + 24);
+    }
+    ctx.restore();
+  }
+
+  function drawLine(ctx, annotation) {
+    ctx.save();
+    const p1 = Viewer.schemaToScreen(annotation.x1, annotation.y1);
+    const p2 = Viewer.schemaToScreen(annotation.x2, annotation.y2);
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.strokeStyle = annotation.color;
+    ctx.lineWidth = 6;
+    ctx.globalAlpha = 0.6;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    [p1, p2].forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = annotation.color;
+      ctx.fill();
+    });
+
+    const cx = (p1.x + p2.x) / 2;
+    const cy = (p1.y + p2.y) / 2;
+    ctx.font = '9px "JetBrains Mono", monospace';
+    const metrics = ctx.measureText(annotation.label || '');
+    const pad = 4;
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.beginPath();
+    roundRect(ctx, cx - metrics.width / 2 - pad, cy - 7, metrics.width + pad * 2, 14, 3);
+    ctx.fill();
+    ctx.fillStyle = annotation.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(annotation.label || '', cx, cy + 3);
+    ctx.restore();
+  }
+
+  function drawFreeDraw(ctx, annotation) {
+    if (!annotation.points || annotation.points.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = annotation.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+
+    const first = Viewer.schemaToScreen(annotation.points[0].x, annotation.points[0].y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < annotation.points.length; i++) {
+      const p = Viewer.schemaToScreen(annotation.points[i].x, annotation.points[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Popup numéro de train
+   */
+  function promptTrainNumber(callback) {
+    const popup = document.getElementById('train-input-popup');
+    const input = document.getElementById('train-number');
+    const confirmBtn = document.getElementById('train-input-confirm');
+    const closeBtn = document.getElementById('train-input-close');
+
+    popup.classList.remove('hidden');
+    input.value = '';
+    input.focus();
+
+    const confirm = () => {
+      const num = input.value.trim();
+      if (num) {
+        popup.classList.add('hidden');
+        callback(num);
+      }
+    };
+
+    const close = () => popup.classList.add('hidden');
+
+    confirmBtn.onclick = confirm;
+    closeBtn.onclick = close;
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') confirm();
+      if (e.key === 'Escape') close();
+    };
+    popup.querySelector('.popup-overlay').onclick = close;
+  }
+
+  function getAnnotations() { return annotations; }
+
+  // === ANNOTATIONS CUSTOM ===
+
+  function setupCustomAnnotations() {
+    loadCustomAnnotations();
+    renderCustomButtons();
+
+    const addBtn = document.getElementById('btn-add-custom');
+    if (addBtn) addBtn.addEventListener('click', showCustomForm);
+  }
+
+  function renderCustomButtons() {
+    const container = document.getElementById('custom-tools');
+    if (!container) return;
+    container.innerHTML = '';
+
+    customAnnotations.forEach((custom, index) => {
+      const btn = document.createElement('div');
+      btn.className = 'custom-tool-btn';
+      btn.dataset.customIndex = index;
+      btn.innerHTML = `
+        <span class="tool-icon" style="color:${custom.color}">${custom.symbol}</span>
+        <span class="tool-label">${custom.name}</span>
+        <button class="custom-tool-delete" title="Supprimer ce type">×</button>
+      `;
+
+      btn.addEventListener('click', (e) => {
+        if (e.target.classList.contains('custom-tool-delete')) {
+          e.stopPropagation();
+          if (confirm(`Supprimer l'annotation "${custom.name}" ?`)) {
+            customAnnotations.splice(index, 1);
+            saveCustomAnnotations();
+            renderCustomButtons();
+          }
+          return;
+        }
+        const toolId = 'custom-' + index;
+        const isActive = btn.classList.contains('active');
+        // Désactiver tous les outils
+        document.querySelectorAll('.tool-btn, .custom-tool-btn').forEach(b => b.classList.remove('active'));
+        if (isActive) {
+          setActiveTool(null);
+        } else {
+          btn.classList.add('active');
+          setActiveTool(toolId);
+        }
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  function showCustomForm() {
+    const popup = document.getElementById('custom-annotation-popup');
+    if (!popup) return;
+    popup.classList.remove('hidden');
+
+    let selectedSymbol = '●';
+    let selectedColor = '#ff4040';
+    let selectedPlacement = 'point';
+
+    // Reset
+    document.getElementById('custom-name').value = '';
+    document.getElementById('custom-symbol-text').value = '';
+    updatePreview();
+
+    // Symbol picker
+    document.querySelectorAll('.symbol-opt').forEach(btn => {
+      btn.classList.remove('selected');
+      btn.onclick = () => {
+        document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedSymbol = btn.dataset.symbol;
+        document.getElementById('custom-symbol-text').value = '';
+        updatePreview();
+      };
+    });
+    document.querySelectorAll('.symbol-opt')[0].classList.add('selected');
+
+    // Symbol text input
+    document.getElementById('custom-symbol-text').addEventListener('input', (e) => {
+      if (e.target.value) {
+        selectedSymbol = e.target.value;
+        document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
+        updatePreview();
+      }
+    });
+
+    // Color picker
+    document.querySelectorAll('.color-opt').forEach(btn => {
+      btn.classList.remove('selected');
+      btn.onclick = () => {
+        document.querySelectorAll('.color-opt').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedColor = btn.dataset.color;
+        updatePreview();
+      };
+    });
+    document.querySelectorAll('.color-opt')[0].classList.add('selected');
+
+    // Placement
+    document.querySelectorAll('.placement-opt').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.placement-opt').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedPlacement = btn.dataset.placement;
+      };
+    });
+
+    function updatePreview() {
+      const previewSymbol = document.getElementById('preview-symbol');
+      const previewName = document.getElementById('preview-name');
+      if (previewSymbol) { previewSymbol.textContent = selectedSymbol; previewSymbol.style.color = selectedColor; }
+      if (previewName) previewName.textContent = document.getElementById('custom-name').value || 'Annotation';
+    }
+
+    document.getElementById('custom-name').addEventListener('input', updatePreview);
+
+    // Confirm
+    document.getElementById('custom-confirm').onclick = () => {
+      const name = document.getElementById('custom-name').value.trim();
+      if (!name) { document.getElementById('custom-name').focus(); return; }
+
+      customAnnotations.push({
+        name: name,
+        symbol: selectedSymbol,
+        color: selectedColor,
+        placement: selectedPlacement,
+      });
+      saveCustomAnnotations();
+      renderCustomButtons();
+      popup.classList.add('hidden');
+    };
+
+    // Close
+    document.getElementById('custom-close').onclick = () => popup.classList.add('hidden');
+    popup.querySelector('.popup-overlay').onclick = () => popup.classList.add('hidden');
+  }
+
+  // === LÉGENDE ===
+  let legendVisible = false;
+
+  function setupLegend() {
+    const btn = document.getElementById('btn-legend');
+    const panel = document.getElementById('legend-panel');
+    const closeBtn = document.getElementById('legend-close');
+    if (!btn || !panel) return;
+
+    btn.addEventListener('click', () => {
+      legendVisible = !legendVisible;
+      if (legendVisible) {
+        panel.classList.remove('hidden');
+        refreshLegend();
+      } else {
+        panel.classList.add('hidden');
+      }
+    });
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        legendVisible = false;
+        panel.classList.add('hidden');
+      });
+    }
+
+    // Rendre draggable
+    if (typeof interact !== 'undefined') {
+      interact(panel).draggable({
+        allowFrom: '#legend-header',
+        inertia: true,
+        modifiers: [
+          interact.modifiers.restrictRect({
+            restriction: '#viewer-wrapper',
+            endOnly: true,
+          })
+        ],
+        listeners: {
+          move(event) {
+            const target = event.target;
+            const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
+            const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+            target.style.transform = `translate(${x}px, ${y}px)`;
+            target.setAttribute('data-x', x);
+            target.setAttribute('data-y', y);
+          }
+        }
+      });
+    }
+  }
+
+  function refreshLegend() {
+    const content = document.getElementById('legend-content');
+    if (!content || !legendVisible) return;
+
+    // Filtrer les annotations numérotées (trains, markers, lignes)
+    const numbered = annotations.filter(a => a.number != null);
+
+    if (numbered.length === 0) {
+      content.innerHTML = '<div class="legend-empty">Aucune annotation</div>';
+      return;
+    }
+
+    // Grouper par tool
+    const groups = {};
+    numbered.forEach(a => {
+      const key = a.tool || a.type;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(a);
+    });
+
+    content.innerHTML = '';
+
+    for (const [tool, items] of Object.entries(groups)) {
+      // Titre du groupe
+      const groupTitle = document.createElement('div');
+      groupTitle.style.cssText = 'padding:4px 12px 2px; font-family:var(--mono); font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--muted);';
+      const firstItem = items[0];
+      groupTitle.textContent = firstItem.label || TRAIN_SYMBOLS[tool]?.label || MARKER_SYMBOLS[tool]?.label || tool;
+      content.appendChild(groupTitle);
+
+      // Items
+      items.sort((a, b) => a.number - b.number);
+      items.forEach(a => {
+        const row = document.createElement('div');
+        row.className = 'legend-item';
+
+        // Icône
+        const icon = document.createElement('span');
+        icon.className = 'legend-item-icon';
+        icon.style.color = a.color;
+        icon.textContent = a.symbol || getAnnotationIcon(a);
+
+        // Pastille numéro
+        const numBadge = document.createElement('span');
+        numBadge.className = 'legend-item-number';
+        numBadge.style.background = a.color;
+        numBadge.textContent = String(a.number);
+
+        // Champ éditable
+        const textWrap = document.createElement('span');
+        textWrap.className = 'legend-item-text';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = a.legendText || a.trainNumber || a.message || '';
+        input.placeholder = 'Description...';
+        input.addEventListener('change', () => {
+          a.legendText = input.value;
+          saveToLocalStorage();
+        });
+        input.addEventListener('blur', () => {
+          a.legendText = input.value;
+          saveToLocalStorage();
+        });
+        textWrap.appendChild(input);
+
+        row.appendChild(icon);
+        row.appendChild(numBadge);
+        row.appendChild(textWrap);
+        content.appendChild(row);
+      });
+    }
+  }
+
+  // Rafraîchir la légende quand les annotations changent
+  const originalRedraw = redraw;
+  redraw = function() {
+    originalRedraw();
+    if (legendVisible) refreshLegend();
+  };
+
+  return {
+    init,
+    setActiveTool,
+    highlightElement,
+    addTrainAnnotation,
+    addTextAnnotation,
+    remove,
+    clear,
+    redraw,
+    getAnnotations,
+    undo,
+    redo,
+    setupLegend,
+    refreshLegend,
+    setupCustomAnnotations,
+    getActiveTool,
+  };
+})();

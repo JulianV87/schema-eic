@@ -1,0 +1,15 @@
+{
+  "name": "eic-paris-nord",
+  "version": "1.0.0",
+  "description": "EIC Paris Nord - Outil de gestion de crise",
+  "private": true,
+  "scripts": {
+    "generate-tiles": "node scripts/generate_tiles.js",
+    "extract-data": "node scripts/extract_data.js",
+    "serve": "npx http-server app -p 8080 -c-1"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.5.207",
+    "sharp": "^0.34.5"
+  }
+}

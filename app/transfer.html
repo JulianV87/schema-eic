@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Transfert config</title>
+<style>
+body{background:#06090f;color:#c8daf5;font-family:'JetBrains Mono',monospace;padding:40px;font-size:14px}
+button{padding:12px 24px;font-size:14px;font-family:inherit;border:none;border-radius:6px;cursor:pointer;margin:8px}
+.green{background:#00d4a0;color:#000}
+.blue{background:#3080ff;color:#fff}
+#log{margin-top:20px;padding:16px;background:#0c1220;border:1px solid #1e304a;border-radius:6px;white-space:pre-wrap;max-height:400px;overflow-y:auto;font-size:12px}
+</style></head><body>
+<h2>Transfert EIC config → Supabase</h2>
+<p>Cette page lit ton localStorage et l'envoie à Supabase.</p>
+<button class="green" onclick="pushAll()">Envoyer tout vers Supabase</button>
+<button class="blue" onclick="checkSupabase()">Vérifier Supabase</button>
+<div id="log"></div>
+<script>
+var URL_SB='https://fbcwsgqrwolxnqpasbgl.supabase.co';
+var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZiY3dzZ3Fyd29seG5xcGFzYmdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NDM5NDgsImV4cCI6MjA4OTUxOTk0OH0.yxadPWsLZwYbpet9wlYfTxW9Halx-XMV56PvorCKwIU';
+var KEYS=['eic_zone_layout','eic_custom_zones','eic_zone_overrides','eic_zone_views','eic_hidden_zones','eic_visible_tables','eic_manual_elements','eic_desserte_pks','eic_pn_prefilled','eic_sectors_prefilled','eic_dessertes_ensured','eic_custom_annotations'];
+
+function log(msg){document.getElementById('log').textContent+=msg+'\n'}
+
+function hdrs(){return{'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'}}
+
+async function pushAll(){
+  log('Lecture localStorage...');
+  var rows=[];
+  KEYS.forEach(function(k){
+    var v=localStorage.getItem(k);
+    if(v!==null){
+      try{rows.push({key:k,value:JSON.parse(v)})}
+      catch(e){rows.push({key:k,value:v})}
+    }
+  });
+  log('Clés trouvées: '+rows.length);
+  rows.forEach(function(r){log('  '+r.key)});
+
+  if(rows.length===0){log('ERREUR: aucune donnée en localStorage!');return}
+
+  log('\nEnvoi vers Supabase...');
+  try{
+    var resp=await fetch(URL_SB+'/rest/v1/config',{method:'POST',headers:hdrs(),body:JSON.stringify(rows)});
+    if(resp.ok){
+      log('OK! '+rows.length+' clés envoyées.');
+      log('\nMaintenant va sur https://eic-paris-nord.vercel.app/app/ et fais Ctrl+Shift+R');
+    }else{
+      var txt=await resp.text();
+      log('ERREUR HTTP '+resp.status+': '+txt);
+    }
+  }catch(e){
+    log('ERREUR réseau: '+e.message);
+  }
+}
+
+async function checkSupabase(){
+  log('Test connexion Supabase...');
+  try{
+    var resp=await fetch(URL_SB+'/rest/v1/config?select=key',{headers:hdrs()});
+    var data=await resp.json();
+    log('Connecté! '+data.length+' clés dans Supabase:');
+    data.forEach(function(r){log('  '+r.key)});
+  }catch(e){
+    log('ERREUR: '+e.message);
+  }
+}
+</script></body></html>
