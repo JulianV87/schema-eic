@@ -214,8 +214,24 @@ const Calibrate = (() => {
     for (const el of allElements) {
       if (el.shape && el.shape.bounds) {
         const b = el.shape.bounds;
-        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-          return el; // Le clic est dans la zone calibrée
+        const rot = el.shape.rotation || 0;
+        if (rot !== 0) {
+          // Transformer le point dans le repère local (non-rotaté) de la shape
+          const cx = b.x + b.w / 2;
+          const cy = b.y + b.h / 2;
+          const cos = Math.cos(-rot);
+          const sin = Math.sin(-rot);
+          const dx = x - cx;
+          const dy = y - cy;
+          const lx = dx * cos - dy * sin + cx;
+          const ly = dx * sin + dy * cos + cy;
+          if (lx >= b.x && lx <= b.x + b.w && ly >= b.y && ly <= b.y + b.h) {
+            return el;
+          }
+        } else {
+          if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+            return el; // Le clic est dans la zone calibrée
+          }
         }
       }
     }
@@ -624,6 +640,7 @@ const Calibrate = (() => {
       type: shapeMode,
       bounds: { x: vpTopLeft.x, y: vpTopLeft.y, w: vpBottomRight.x - vpTopLeft.x, h: vpBottomRight.y - vpTopLeft.y },
       contour: shapeContour || null,
+      rotation: 0,
     };
 
     cancelShapeDrawing();
@@ -693,10 +710,13 @@ const Calibrate = (() => {
 
   // === VISUALISATION DEBUG DES ZONES ===
 
-  let dragHandle = null;   // 'n','s','e','w','ne','nw','se','sw' ou null
+  let dragHandle = null;   // 'n','s','e','w','ne','nw','se','sw','rotate' ou null
   let dragOrigin = null;   // { x, y } viewport au début du drag
   let dragOrigBounds = null; // bounds au début du drag
+  let isRotating = false;  // true pendant un drag de rotation
+  let rotateStartAngle = 0; // angle initial lors du début de rotation
   const HANDLE_SIZE = 6;
+  const ROTATE_HANDLE_OFFSET = 22; // pixels au-dessus du bord supérieur
 
   function toggleDebugOverlay() {
     debugOverlay = !debugOverlay;
@@ -759,7 +779,36 @@ const Calibrate = (() => {
       const b = el.shape.bounds;
       const tl = Viewer.schemaToScreen(b.x, b.y);
       const br = Viewer.schemaToScreen(b.x + b.w, b.y + b.h);
-      return { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
+      const sb = { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
+
+      // Si rotation, calculer l'AABB du rectangle tourné
+      const rot = el.shape.rotation || 0;
+      if (rot !== 0) {
+        const cx = sb.x + sb.w / 2;
+        const cy = sb.y + sb.h / 2;
+        const hw = sb.w / 2;
+        const hh = sb.h / 2;
+        const cos = Math.cos(rot);
+        const sin = Math.sin(rot);
+        // Les 4 coins relatifs au centre
+        const corners = [
+          { x: -hw, y: -hh },
+          { x:  hw, y: -hh },
+          { x:  hw, y:  hh },
+          { x: -hw, y:  hh },
+        ];
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        corners.forEach(c => {
+          const rx = c.x * cos - c.y * sin + cx;
+          const ry = c.x * sin + c.y * cos + cy;
+          if (rx < minX) minX = rx;
+          if (ry < minY) minY = ry;
+          if (rx > maxX) maxX = rx;
+          if (ry > maxY) maxY = ry;
+        });
+        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      }
+      return sb;
     } else {
       const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
       const r = 6;
@@ -785,16 +834,37 @@ const Calibrate = (() => {
       ctx.save();
 
       if (el.shape && el.shape.bounds) {
-        // Rectangle coloré
+        const rot = el.shape.rotation || 0;
+        // Pour le dessin, on utilise les bounds non-rotatées converties en écran
+        const b = el.shape.bounds;
+        const tl = Viewer.schemaToScreen(b.x, b.y);
+        const br = Viewer.schemaToScreen(b.x + b.w, b.y + b.h);
+        const rawW = br.x - tl.x;
+        const rawH = br.y - tl.y;
+        const cx = tl.x + rawW / 2;
+        const cy = tl.y + rawH / 2;
+
+        if (rot !== 0) {
+          ctx.translate(cx, cy);
+          ctx.rotate(rot);
+          ctx.translate(-cx, -cy);
+        }
+
+        // Rectangle coloré (dessiné dans l'espace non-rotaté)
         ctx.fillStyle = color;
         ctx.globalAlpha = isSelected ? 0.4 : 0.15;
-        ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+        ctx.fillRect(tl.x, tl.y, rawW, rawH);
         ctx.globalAlpha = isSelected ? 1 : 0.5;
         ctx.strokeStyle = color;
         ctx.lineWidth = isSelected ? 2 : 1;
         if (!isSelected) ctx.setLineDash([3, 3]);
-        ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
+        ctx.strokeRect(tl.x, tl.y, rawW, rawH);
         ctx.setLineDash([]);
+
+        if (rot !== 0) {
+          // Remettre la transformation pour le label
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
       } else {
         // Cercle pour les éléments sans shape
         ctx.beginPath();
@@ -835,9 +905,37 @@ const Calibrate = (() => {
     ctx.strokeStyle = '#ff9520';
     ctx.lineWidth = 1.5;
 
-    Object.values(handles).forEach(h => {
-      ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
-      ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+    Object.entries(handles).forEach(([name, h]) => {
+      if (name === 'rotate') {
+        // Ligne de connexion du haut-centre vers la poignée de rotation
+        const topCenter = handles.n;
+        ctx.beginPath();
+        ctx.moveTo(topCenter.x, topCenter.y);
+        ctx.lineTo(h.x, h.y);
+        ctx.strokeStyle = '#ff9520';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Cercle de rotation
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, hs, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.strokeStyle = '#00d4a0';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Petite fleche indicatrice (arc)
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, hs - 1, -Math.PI * 0.6, Math.PI * 0.2);
+        ctx.strokeStyle = '#00d4a0';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#ff9520';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+        ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+      }
     });
     ctx.restore();
   }
@@ -854,6 +952,7 @@ const Calibrate = (() => {
       sw: { x: sb.x, y: sb.y + sb.h },
       s:  { x: cx, y: sb.y + sb.h },
       se: { x: sb.x + sb.w, y: sb.y + sb.h },
+      rotate: { x: cx, y: sb.y - ROTATE_HANDLE_OFFSET },
     };
   }
 
@@ -862,7 +961,15 @@ const Calibrate = (() => {
     const handles = getHandlePositions(sb);
     const tol = HANDLE_SIZE + 4;
 
+    // Test rotation handle first (circle, slightly larger tolerance)
+    const rh = handles.rotate;
+    if (rh) {
+      const dist = Math.sqrt((mx - rh.x) ** 2 + (my - rh.y) ** 2);
+      if (dist < HANDLE_SIZE + 6) return 'rotate';
+    }
+
     for (const [name, pos] of Object.entries(handles)) {
+      if (name === 'rotate') continue;
       if (Math.abs(mx - pos.x) < tol && Math.abs(my - pos.y) < tol) {
         return name;
       }
@@ -885,16 +992,28 @@ const Calibrate = (() => {
         if (handle) {
           e.preventDefault();
           e.stopPropagation();
-          dragHandle = handle;
-          dragOrigin = { x: mx, y: my };
-          // Sauvegarder les bounds d'origine en viewport
-          if (sel.shape && sel.shape.bounds) {
-            dragOrigBounds = { ...sel.shape.bounds };
+          if (handle === 'rotate') {
+            // Commencer la rotation
+            isRotating = true;
+            dragHandle = 'rotate';
+            const sb = getElementScreenBounds(sel);
+            const cx = sb.x + sb.w / 2;
+            const cy = sb.y + sb.h / 2;
+            rotateStartAngle = Math.atan2(my - cy, mx - cx) - (sel.shape && sel.shape.rotation || 0);
+            dragOrigin = { x: mx, y: my };
+            debugCanvas.style.cursor = 'grabbing';
           } else {
-            const r = DEFAULT_RADIUS;
-            dragOrigBounds = { x: sel.x_pct - r, y: sel.y_pct - r, w: r * 2, h: r * 2 };
+            dragHandle = handle;
+            dragOrigin = { x: mx, y: my };
+            // Sauvegarder les bounds d'origine en viewport
+            if (sel.shape && sel.shape.bounds) {
+              dragOrigBounds = { ...sel.shape.bounds };
+            } else {
+              const r = DEFAULT_RADIUS;
+              dragOrigBounds = { x: sel.x_pct - r, y: sel.y_pct - r, w: r * 2, h: r * 2 };
+            }
+            debugCanvas.style.cursor = getHandleCursor(handle);
           }
-          debugCanvas.style.cursor = getHandleCursor(handle);
           return;
         }
       }
@@ -914,7 +1033,19 @@ const Calibrate = (() => {
     const viewer = Viewer.getMainViewer();
     if (!viewer) return;
 
-    if (dragHandle && dragOrigBounds) {
+    if (isRotating && dragHandle === 'rotate') {
+      // Rotation en temps réel
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel) {
+        const sb = getElementScreenBounds(sel);
+        const cx = sb.x + sb.w / 2;
+        const cy = sb.y + sb.h / 2;
+        const angle = Math.atan2(my - cy, mx - cx) - rotateStartAngle;
+        if (!sel.shape) sel.shape = { type: 'rectangle', bounds: null, contour: null, rotation: 0 };
+        sel.shape.rotation = angle;
+        redrawDebugOverlay();
+      }
+    } else if (dragHandle && dragOrigBounds) {
       // Calculer le delta en coordonnées viewport
       const vpNow = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(mx, my));
       const vpOrig = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(dragOrigin.x, dragOrigin.y));
@@ -937,7 +1068,7 @@ const Calibrate = (() => {
       // Appliquer temporairement pour le preview
       const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
       if (sel) {
-        if (!sel.shape) sel.shape = { type: 'rectangle', bounds: null, contour: null };
+        if (!sel.shape) sel.shape = { type: 'rectangle', bounds: null, contour: null, rotation: 0 };
         sel.shape.bounds = nb;
         redrawDebugOverlay();
       }
@@ -952,7 +1083,13 @@ const Calibrate = (() => {
   }
 
   function onDebugMouseUp(e) {
-    if (dragHandle && selectedElementId) {
+    if (isRotating && selectedElementId) {
+      // Sauvegarder la rotation finale
+      const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+      if (sel && sel.shape) {
+        Data.saveManualElement(sel);
+      }
+    } else if (dragHandle && selectedElementId) {
       // Sauvegarder les nouvelles bounds
       const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
       if (sel && sel.shape && sel.shape.bounds) {
@@ -966,13 +1103,15 @@ const Calibrate = (() => {
     dragHandle = null;
     dragOrigin = null;
     dragOrigBounds = null;
+    isRotating = false;
     debugCanvas.style.cursor = 'pointer';
     redrawDebugOverlay();
   }
 
   function getHandleCursor(handle) {
     const map = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
-      nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' };
+      nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+      rotate: 'grab' };
     return map[handle] || 'pointer';
   }
 

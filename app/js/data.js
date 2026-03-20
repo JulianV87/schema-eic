@@ -37,6 +37,25 @@ const Data = (() => {
         Store.set('eic_elements', ELEMENTS);
         console.log(`Nettoyage: ${cleaned} identifiants corrigés`);
       }
+      // Purger les shapes avec des bounds invalides / cassées
+      let purged = 0;
+      ELEMENTS.forEach(e => {
+        if (!e.shape || !e.shape.bounds) return;
+        const b = e.shape.bounds;
+        const invalid =
+          b.w <= 0 || b.h <= 0 ||
+          isNaN(b.x) || isNaN(b.y) ||
+          b.x < -1 || b.x > 2 ||
+          b.y < -1 || b.y > 1;
+        if (invalid) {
+          delete e.shape;
+          purged++;
+        }
+      });
+      if (purged > 0) {
+        Store.set('eic_elements', ELEMENTS);
+        console.log(`Purge: ${purged} shapes cassées supprimées`);
+      }
       console.log(`Données Supabase: ${GARES.length} gares, ${ELEMENTS.length} éléments`);
     } else {
       // Première utilisation → importer depuis le JSON du PDF
