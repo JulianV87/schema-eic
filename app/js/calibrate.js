@@ -16,6 +16,24 @@ const Calibrate = (() => {
   let freePoints = [];
   let isDrawingFree = false;
 
+  // Mode debug : visualisation des zones
+  let debugOverlay = false;
+  let debugCanvas = null;
+  let selectedElementId = null;
+  let resizeScale = 1.0;
+
+  const TYPE_COLORS = {
+    pn: '#3080ff',
+    signal: '#00d4a0',
+    aiguille: '#ff4040',
+    cv: '#ff9520',
+    gare: '#ffdd00',
+    pk: '#9060ff',
+    poste: '#ff40a0',
+    autre: '#4a6a9a',
+  };
+  const DEFAULT_RADIUS = 0.003; // rayon par défaut pour les éléments sans shape
+
   function init() {
     const btn = document.getElementById('btn-calibrate');
     if (!btn) return;
@@ -38,6 +56,17 @@ const Calibrate = (() => {
         hideShapePicker();
         cancelShapeDrawing();
         disableCalibrationClick();
+        // Nettoyer le debug overlay
+        if (debugOverlay) {
+          debugOverlay = false;
+          destroyDebugCanvas();
+          hideResizeControls();
+          const viewer = Viewer.getMainViewer();
+          if (viewer) {
+            viewer.removeHandler('animation', redrawDebugOverlay);
+            viewer.removeHandler('resize', resizeDebugCanvas);
+          }
+        }
       }
     });
 
@@ -367,9 +396,31 @@ const Calibrate = (() => {
       { id: 'rectangle', icon: '▭', label: 'Rectangle' },
       { id: 'circle', icon: '○', label: 'Cercle' },
       { id: 'free', icon: '✏', label: 'Libre' },
+      { id: '_sep' },
+      { id: 'zones', icon: '◫', label: 'Zones', toggle: true },
     ];
 
     modes.forEach(m => {
+      if (m.id === '_sep') {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'width:1px;background:#2a4266;margin:2px 4px;';
+        picker.appendChild(sep);
+        return;
+      }
+      if (m.toggle) {
+        const btn = document.createElement('button');
+        btn.dataset.mode = m.id;
+        btn.title = 'Afficher/masquer les zones calibrées';
+        btn.style.cssText = `
+          padding:5px 10px; border:1px solid transparent; border-radius:4px;
+          background:${debugOverlay ? '#1a2a10' : 'none'}; color:${debugOverlay ? '#00d4a0' : '#4a6a9a'};
+          cursor:pointer; font-size:13px; transition:all 0.15s;
+        `;
+        btn.textContent = m.icon + ' ' + m.label;
+        btn.addEventListener('click', () => toggleDebugOverlay());
+        picker.appendChild(btn);
+        return;
+      }
       const btn = document.createElement('button');
       btn.className = 'calibrate-shape-btn' + (m.id === shapeMode ? ' active' : '');
       btn.dataset.mode = m.id;
@@ -629,6 +680,311 @@ const Calibrate = (() => {
     ctx.fillStyle = 'rgba(255,149,32,0.08)';
     ctx.fill();
     ctx.restore();
+  }
+
+  // === VISUALISATION DEBUG DES ZONES ===
+
+  function toggleDebugOverlay() {
+    debugOverlay = !debugOverlay;
+    if (debugOverlay) {
+      createDebugCanvas();
+      redrawDebugOverlay();
+      // Re-dessiner à chaque mouvement du viewport
+      const viewer = Viewer.getMainViewer();
+      if (viewer) {
+        viewer.addHandler('animation', redrawDebugOverlay);
+        viewer.addHandler('resize', resizeDebugCanvas);
+      }
+      showResizeControls();
+    } else {
+      destroyDebugCanvas();
+      hideResizeControls();
+      const viewer = Viewer.getMainViewer();
+      if (viewer) {
+        viewer.removeHandler('animation', redrawDebugOverlay);
+        viewer.removeHandler('resize', resizeDebugCanvas);
+      }
+      selectedElementId = null;
+    }
+    // Mettre à jour le bouton
+    hideShapePicker();
+    showShapePicker();
+  }
+
+  function createDebugCanvas() {
+    if (debugCanvas) return;
+    const container = document.getElementById('viewer-container');
+    debugCanvas = document.createElement('canvas');
+    debugCanvas.id = 'calibrate-debug-canvas';
+    debugCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:11;';
+    debugCanvas.width = container.offsetWidth;
+    debugCanvas.height = container.offsetHeight;
+    container.appendChild(debugCanvas);
+
+    // Activer les clics sur le debug canvas pour sélectionner
+    debugCanvas.style.pointerEvents = 'auto';
+    debugCanvas.style.cursor = 'pointer';
+    debugCanvas.addEventListener('click', onDebugClick);
+  }
+
+  function destroyDebugCanvas() {
+    if (debugCanvas) {
+      debugCanvas.removeEventListener('click', onDebugClick);
+      debugCanvas.remove();
+      debugCanvas = null;
+    }
+  }
+
+  function resizeDebugCanvas() {
+    if (!debugCanvas) return;
+    const container = document.getElementById('viewer-container');
+    debugCanvas.width = container.offsetWidth;
+    debugCanvas.height = container.offsetHeight;
+    redrawDebugOverlay();
+  }
+
+  function redrawDebugOverlay() {
+    if (!debugCanvas) return;
+    const ctx = debugCanvas.getContext('2d');
+    ctx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+
+    const allElements = Data.searchElementFuzzy('');
+
+    allElements.forEach(el => {
+      const color = TYPE_COLORS[el.type] || TYPE_COLORS.autre;
+      const isSelected = el.id === selectedElementId;
+      const alpha = isSelected ? 0.5 : 0.2;
+      const strokeAlpha = isSelected ? 1 : 0.6;
+
+      if (el.shape && el.shape.bounds) {
+        // Élément avec shape → dessiner les bounds
+        const b = el.shape.bounds;
+        const tl = Viewer.schemaToScreen(b.x, b.y);
+        const br = Viewer.schemaToScreen(b.x + b.w, b.y + b.h);
+        const w = br.x - tl.x;
+        const h = br.y - tl.y;
+
+        if (w < 1 && h < 1) return; // Hors écran ou trop petit
+
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = alpha;
+        ctx.fillRect(tl.x, tl.y, w, h);
+        ctx.globalAlpha = strokeAlpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isSelected ? 2 : 1;
+        if (!isSelected) ctx.setLineDash([3, 3]);
+        ctx.strokeRect(tl.x, tl.y, w, h);
+        ctx.setLineDash([]);
+
+        // Label
+        ctx.globalAlpha = 0.9;
+        ctx.font = '9px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(el.identifiant || el.id, tl.x + 2, tl.y - 3);
+        ctx.restore();
+      } else {
+        // Élément sans shape → dessiner un cercle à sa position
+        const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
+        const r = Math.max(4, 8 * (isSelected ? 1.5 : 1));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = alpha + 0.1;
+        ctx.fill();
+        ctx.globalAlpha = strokeAlpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.stroke();
+
+        // Label
+        ctx.globalAlpha = 0.8;
+        ctx.font = '8px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(el.identifiant || '', pos.x + r + 2, pos.y + 3);
+        ctx.restore();
+      }
+    });
+
+    // Légende des types en bas à gauche
+    drawDebugLegend(ctx);
+  }
+
+  function drawDebugLegend(ctx) {
+    const x = 10, y = debugCanvas.height - 10;
+    const types = Object.entries(TYPE_COLORS);
+    const lh = 14;
+    const totalH = types.length * lh + 8;
+
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = 'rgba(12,18,32,0.9)';
+    ctx.fillRect(x, y - totalH, 100, totalH);
+    ctx.font = '9px "JetBrains Mono", monospace';
+
+    types.forEach(([type, color], i) => {
+      const ly = y - totalH + 12 + i * lh;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(x + 8, ly - 3, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#c8daf5';
+      ctx.fillText(type, x + 18, ly);
+    });
+    ctx.restore();
+  }
+
+  function onDebugClick(e) {
+    const rect = debugCanvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+    const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(cx, cy));
+
+    // Chercher l'élément cliqué
+    const clicked = findNearbyElement(vp.x, vp.y);
+    if (clicked) {
+      selectedElementId = clicked.id;
+      resizeScale = 1.0;
+      updateResizeControls();
+      redrawDebugOverlay();
+    } else {
+      selectedElementId = null;
+      redrawDebugOverlay();
+    }
+  }
+
+  function showResizeControls() {
+    let panel = document.getElementById('debug-resize-panel');
+    if (panel) return;
+
+    const container = document.getElementById('viewer-container');
+    panel = document.createElement('div');
+    panel.id = 'debug-resize-panel';
+    panel.style.cssText = `
+      position:absolute; bottom:8px; right:12px; z-index:30;
+      background:rgba(12,18,32,0.95); border:1px solid #2a4266; border-radius:6px;
+      font-family:'JetBrains Mono',monospace; font-size:10px; color:#c8daf5;
+      padding:8px 12px; display:flex; flex-direction:column; gap:6px; min-width:200px;
+    `;
+
+    panel.innerHTML = `
+      <div style="font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#4a6a9a;">Élément sélectionné</div>
+      <div id="debug-selected-name" style="color:#ff9520;">Aucun</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span>Zone:</span>
+        <button id="debug-shrink" style="padding:2px 8px;background:#1e304a;border:1px solid #2a4266;border-radius:3px;color:#ff4040;cursor:pointer;font-size:12px;">−</button>
+        <span id="debug-scale-label">100%</span>
+        <button id="debug-grow" style="padding:2px 8px;background:#1e304a;border:1px solid #2a4266;border-radius:3px;color:#00d4a0;cursor:pointer;font-size:12px;">+</button>
+      </div>
+      <button id="debug-apply" style="padding:4px;background:#00d4a0;border:none;border-radius:3px;color:#0c1220;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;">Appliquer</button>
+    `;
+    container.appendChild(panel);
+
+    document.getElementById('debug-shrink').addEventListener('click', () => {
+      resizeScale = Math.max(0.2, resizeScale - 0.1);
+      updateResizeControls();
+      previewResize();
+    });
+    document.getElementById('debug-grow').addEventListener('click', () => {
+      resizeScale = Math.min(3.0, resizeScale + 0.1);
+      updateResizeControls();
+      previewResize();
+    });
+    document.getElementById('debug-apply').addEventListener('click', applyResize);
+  }
+
+  function hideResizeControls() {
+    const panel = document.getElementById('debug-resize-panel');
+    if (panel) panel.remove();
+  }
+
+  function updateResizeControls() {
+    const nameEl = document.getElementById('debug-selected-name');
+    const scaleEl = document.getElementById('debug-scale-label');
+    if (!nameEl || !scaleEl) return;
+
+    if (selectedElementId) {
+      const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
+      nameEl.textContent = el ? (el.identifiant + ' (' + el.type + ')') : selectedElementId;
+      nameEl.style.color = el ? (TYPE_COLORS[el.type] || '#ff9520') : '#ff9520';
+    } else {
+      nameEl.textContent = 'Aucun';
+      nameEl.style.color = '#ff9520';
+    }
+    scaleEl.textContent = Math.round(resizeScale * 100) + '%';
+  }
+
+  function previewResize() {
+    if (!selectedElementId) return;
+    redrawDebugOverlay();
+
+    // Dessiner un aperçu de la nouvelle taille
+    const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
+    if (!el || !debugCanvas) return;
+
+    const ctx = debugCanvas.getContext('2d');
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = '#ffdd00';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+
+    if (el.shape && el.shape.bounds) {
+      const b = el.shape.bounds;
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const nw = b.w * resizeScale;
+      const nh = b.h * resizeScale;
+      const tl = Viewer.schemaToScreen(cx - nw / 2, cy - nh / 2);
+      const br = Viewer.schemaToScreen(cx + nw / 2, cy + nh / 2);
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+    } else {
+      const pos = Viewer.schemaToScreen(el.x_pct, el.y_pct);
+      const r = DEFAULT_RADIUS * resizeScale;
+      const tl = Viewer.schemaToScreen(el.x_pct - r, el.y_pct - r);
+      const br = Viewer.schemaToScreen(el.x_pct + r, el.y_pct + r);
+      const w = br.x - tl.x;
+      const h = br.y - tl.y;
+      ctx.strokeRect(tl.x, tl.y, w, h);
+    }
+    ctx.restore();
+  }
+
+  function applyResize() {
+    if (!selectedElementId || resizeScale === 1.0) return;
+
+    const el = Data.searchElementFuzzy('').find(e => e.id === selectedElementId);
+    if (!el) return;
+
+    if (el.shape && el.shape.bounds) {
+      const b = el.shape.bounds;
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const nw = b.w * resizeScale;
+      const nh = b.h * resizeScale;
+      el.shape.bounds = { x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh };
+    } else {
+      // Créer une shape à partir du point
+      const r = DEFAULT_RADIUS * resizeScale;
+      el.shape = {
+        type: 'rectangle',
+        bounds: { x: el.x_pct - r, y: el.y_pct - r, w: r * 2, h: r * 2 },
+        contour: null,
+      };
+    }
+
+    Data.saveManualElement(el);
+    resizeScale = 1.0;
+    updateResizeControls();
+    redrawDebugOverlay();
+    showStatusMsg(`Zone de ${el.identifiant} redimensionnée`);
+    setTimeout(() => { if (active) showStatusMsg('Mode calibration'); }, 1500);
   }
 
   function showStatusMsg(msg) {
