@@ -906,15 +906,16 @@ const Settings = (() => {
           const q = normalize(input.value);
           dropdown.innerHTML = '';
           if (q.length < 1) { dropdown.classList.add('hidden'); return; }
-          const matches = Data.getGares().filter(g => normalize(g.nom).includes(q)).slice(0, 8);
+          const allDessertes = [...Data.getAllDessertes().values()];
+          const matches = allDessertes.filter(d => normalize(d.nom).includes(q)).slice(0, 12);
           if (matches.length === 0) { dropdown.classList.add('hidden'); return; }
-          matches.forEach(g => {
+          matches.forEach(d => {
             const opt = document.createElement('div');
             opt.className = 'calibrate-dropdown-item';
-            opt.textContent = g.nom;
+            opt.textContent = d.nom;
             opt.addEventListener('mousedown', (e) => {
               e.preventDefault();
-              input.value = g.nom;
+              input.value = d.nom;
               dropdown.classList.add('hidden');
             });
             dropdown.appendChild(opt);
@@ -1058,12 +1059,12 @@ const Settings = (() => {
     listDiv.style.cssText = 'max-height:220px;overflow-y:auto;';
     menu.appendChild(listDiv);
 
-    const gares = Data.getGares();
+    const allDessertes = [...Data.getAllDessertes().values()];
 
     function renderGareList(filter) {
       listDiv.innerHTML = '';
       const q = normalize(filter || '');
-      const sorted = [...gares].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+      const sorted = [...allDessertes].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
 
       // Option "Aucune"
       const noneItem = document.createElement('div');
@@ -1078,18 +1079,18 @@ const Settings = (() => {
       });
       listDiv.appendChild(noneItem);
 
-      sorted.forEach(g => {
-        if (q && !normalize(g.nom).includes(q)) return;
+      sorted.forEach(d => {
+        if (q && !normalize(d.nom).includes(q)) return;
         const item = document.createElement('div');
         item.className = 'add-menu-item';
-        if (pn.gare_id === g.id) {
+        if (pn.gare_id === d.id) {
           item.style.color = 'var(--accent2)';
-          item.textContent = g.nom + ' ●';
+          item.textContent = d.nom + ' ●';
         } else {
-          item.textContent = g.nom;
+          item.textContent = d.nom;
         }
         item.addEventListener('click', () => {
-          pn.gare_id = g.id;
+          pn.gare_id = d.id;
           Data.saveManualElement(pn);
           menu.remove();
           renderTab('pn');
