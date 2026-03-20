@@ -1459,6 +1459,22 @@ const Settings = (() => {
   // TABLES
   // =========================================
 
+  /** Collecter toutes les lignes uniques du layout */
+  function getUniqueLines(layout) {
+    const seen = new Map();
+    const result = [];
+    (layout.tables || []).forEach(t => {
+      (t.lines || []).forEach(l => {
+        const key = l.nom.toLowerCase().trim();
+        if (!seen.has(key)) {
+          seen.set(key, l);
+          result.push(l);
+        }
+      });
+    });
+    return result.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  }
+
   function renderTables(container) {
     const layout = getLayout();
     if (!layout.tables) return;
@@ -1469,6 +1485,7 @@ const Settings = (() => {
 
       const item = document.createElement('div');
       item.className = 'settings-item';
+      item.style.flexWrap = 'wrap';
 
       const name = document.createElement('span');
       name.className = 'settings-item-name';
@@ -1481,10 +1498,21 @@ const Settings = (() => {
       meta.textContent = lineCount + ' ligne' + (lineCount > 1 ? 's' : '');
       item.appendChild(meta);
 
-      if (!isFixed) {
-        const actions = document.createElement('span');
-        actions.className = 'settings-item-actions';
+      const actions = document.createElement('span');
+      actions.className = 'settings-item-actions';
 
+      // Bouton assigner des lignes
+      const addLineBtn = document.createElement('button');
+      addLineBtn.className = 'zone-item-btn';
+      addLineBtn.textContent = '+';
+      addLineBtn.title = 'Assigner / retirer des lignes';
+      addLineBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showLineCheckboxModal(table);
+      });
+      actions.appendChild(addLineBtn);
+
+      if (!isFixed) {
         const renameBtn = document.createElement('button');
         renameBtn.className = 'zone-item-btn';
         renameBtn.textContent = '✎';
@@ -1511,8 +1539,37 @@ const Settings = (() => {
           renderTab('tables');
         });
         actions.appendChild(delBtn);
+      }
 
-        item.appendChild(actions);
+      item.appendChild(actions);
+
+      // Afficher les lignes assignées en chips
+      if ((table.lines || []).length > 0) {
+        const chips = document.createElement('div');
+        chips.style.cssText = 'width:100%;display:flex;flex-wrap:wrap;gap:2px;margin-top:3px;padding-left:4px;';
+        table.lines.forEach(line => {
+          const chip = document.createElement('span');
+          chip.style.cssText = 'padding:1px 5px;font-size:8px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:2px;color:var(--muted);display:inline-flex;align-items:center;gap:3px;';
+          chip.textContent = line.nom;
+
+          const removeBtn = document.createElement('span');
+          removeBtn.textContent = '✕';
+          removeBtn.title = 'Retirer cette ligne de la table';
+          removeBtn.style.cssText = 'cursor:pointer;font-size:7px;color:var(--muted);';
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const freshLayout = getLayout();
+            const t = freshLayout.tables.find(t2 => t2.id === table.id);
+            if (t) {
+              t.lines = (t.lines || []).filter(l => l.id !== line.id);
+              saveLayoutObj(freshLayout);
+              renderTab('tables');
+            }
+          });
+          chip.appendChild(removeBtn);
+          chips.appendChild(chip);
+        });
+        item.appendChild(chips);
       }
 
       container.appendChild(item);
@@ -1530,6 +1587,150 @@ const Settings = (() => {
       renderTab('tables');
     });
     container.appendChild(addBtn);
+  }
+
+  function showLineCheckboxModal(table) {
+    const old = document.getElementById('line-checkbox-modal');
+    if (old) old.remove();
+
+    const layout = getLayout();
+    const allLines = getUniqueLines(layout);
+    const currentLineIds = new Set((table.lines || []).map(l => l.id));
+
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'line-checkbox-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
+
+    // Panneau
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:360px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const title = document.createElement('span');
+    title.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);';
+    title.textContent = 'Lignes — ' + table.nom;
+    header.appendChild(title);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    // Barre de recherche
+    const searchRow = document.createElement('div');
+    searchRow.style.cssText = 'padding:6px 14px;';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Filtrer les lignes...';
+    searchInput.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;';
+    searchRow.appendChild(searchInput);
+    panel.appendChild(searchRow);
+
+    // Liste scrollable
+    const listDiv = document.createElement('div');
+    listDiv.style.cssText = 'overflow-y:auto;flex:1;padding:4px 0;';
+    panel.appendChild(listDiv);
+
+    // Footer
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:8px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const countEl = document.createElement('span');
+    countEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--muted);';
+    footer.appendChild(countEl);
+
+    const btnGroup = document.createElement('div');
+    btnGroup.style.cssText = 'display:flex;gap:6px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'padding:5px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    btnGroup.appendChild(cancelBtn);
+    const saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'padding:5px 16px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+    saveBtn.textContent = 'Enregistrer';
+    btnGroup.appendChild(saveBtn);
+    footer.appendChild(btnGroup);
+    panel.appendChild(footer);
+
+    // État des sélections
+    const selected = new Set(currentLineIds);
+
+    function updateCount() {
+      countEl.textContent = selected.size + ' ligne' + (selected.size > 1 ? 's' : '') + ' assignée' + (selected.size > 1 ? 's' : '');
+    }
+
+    function renderCheckboxList(filter) {
+      listDiv.innerHTML = '';
+      const q = normalize(filter || '');
+
+      allLines.forEach(line => {
+        if (q && !normalize(line.nom).includes(q)) return;
+
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 14px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text);';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.has(line.id);
+        cb.style.cssText = 'accent-color:var(--accent2);cursor:pointer;flex-shrink:0;';
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(line.id);
+          else selected.delete(line.id);
+          updateCount();
+        });
+        row.appendChild(cb);
+
+        const label = document.createElement('span');
+        label.textContent = line.nom;
+        label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        row.appendChild(label);
+
+        // Nombre de dessertes
+        const dCount = (line.zoneIds || []).length;
+        if (dCount > 0) {
+          const badge = document.createElement('span');
+          badge.style.cssText = 'font-size:9px;color:var(--muted);margin-left:auto;flex-shrink:0;';
+          badge.textContent = dCount + ' desserte' + (dCount > 1 ? 's' : '');
+          row.appendChild(badge);
+        }
+
+        listDiv.appendChild(row);
+      });
+    }
+
+    searchInput.addEventListener('input', () => renderCheckboxList(searchInput.value));
+
+    saveBtn.addEventListener('click', () => {
+      const freshLayout = getLayout();
+      const t = freshLayout.tables.find(t2 => t2.id === table.id);
+      if (t) {
+        // Reconstruire la liste de lignes : garder celles sélectionnées avec leurs données
+        const allLinesMap = new Map();
+        freshLayout.tables.forEach(tb => (tb.lines || []).forEach(l => {
+          if (!allLinesMap.has(l.id)) allLinesMap.set(l.id, l);
+        }));
+        t.lines = [...selected].map(id => {
+          const existing = allLinesMap.get(id);
+          return existing ? { ...existing } : null;
+        }).filter(Boolean);
+        saveLayoutObj(freshLayout);
+      }
+      overlay.remove();
+      renderTab('tables');
+    });
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    renderCheckboxList('');
+    updateCount();
+    searchInput.focus();
   }
 
   // =========================================
