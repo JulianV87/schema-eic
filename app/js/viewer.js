@@ -223,7 +223,7 @@ const Viewer = (() => {
     zoomViewer.viewport.zoomTo(15, point, true);
 
     // Remplir les métadonnées
-    const gare = Data.getGare(element.gare_id) || Data.getAllDessertes().get(element.gare_id) || null;
+    const gare = Data.getAllDessertes().get(element.gare_id) || Data.getGare(element.gare_id) || null;
     document.getElementById('zoom-popup-title').textContent = element.identifiant;
     document.getElementById('meta-gare').textContent = gare ? gare.nom : '—';
     document.getElementById('meta-pk').textContent = element.pk ? 'Km ' + element.pk : '—';

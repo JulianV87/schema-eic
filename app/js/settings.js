@@ -753,7 +753,7 @@ const Settings = (() => {
           if (!match) return;
         }
 
-        const gare = el.gare_id ? (Data.getGare(el.gare_id) || Data.getAllDessertes().get(el.gare_id) || null) : null;
+        const gare = el.gare_id ? (Data.getAllDessertes().get(el.gare_id) || Data.getGare(el.gare_id) || null) : null;
 
         const item = document.createElement('div');
         item.className = 'settings-item';
