@@ -92,7 +92,7 @@ const Settings = (() => {
 
     if (activeTab === 'dessertes') renderDessertes(container);
     else if (activeTab === 'pn') renderInfraTab(container, 'pn', 'PN');
-    else if (activeTab === 'signaux') renderInfraTab(container, 'signal', 'Signal');
+    else if (activeTab === 'signaux') renderInfraTab(container, ['signal', 'cv'], 'Signal');
     else if (activeTab === 'aiguilles') renderInfraTab(container, 'aiguille', 'Aiguille');
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
@@ -693,11 +693,12 @@ const Settings = (() => {
 
   function getAllElementsByType(elType) {
     // Dédoublonnage par id ET par position
+    const types = Array.isArray(elType) ? elType : [elType];
     const seenIds = new Set();
     const seenPos = new Set();
     const results = [];
     Data.searchElementFuzzy('').forEach(el => {
-      if (el.type !== elType) return;
+      if (!types.includes(el.type)) return;
       if (seenIds.has(el.id)) return;
       const posKey = Math.round(el.x_pct * 300) + ',' + Math.round(el.y_pct * 300);
       if (seenPos.has(posKey)) return;
