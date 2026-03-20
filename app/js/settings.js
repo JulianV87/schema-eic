@@ -1240,6 +1240,16 @@ const Settings = (() => {
         });
         actions.appendChild(renameBtn);
 
+        const addDesserteBtn = document.createElement('button');
+        addDesserteBtn.className = 'zone-item-btn';
+        addDesserteBtn.textContent = '+';
+        addDesserteBtn.title = 'Ajouter / retirer des dessertes';
+        addDesserteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showDesserteCheckboxModal(table.id, line);
+        });
+        actions.appendChild(addDesserteBtn);
+
         const delBtn = document.createElement('button');
         delBtn.className = 'zone-item-btn delete';
         delBtn.textContent = '✕';
@@ -1291,6 +1301,135 @@ const Settings = (() => {
         container.appendChild(item);
       });
     });
+  }
+
+  // =========================================
+  // MODALE DESSERTES AVEC CASES À COCHER
+  // =========================================
+
+  function showDesserteCheckboxModal(tableId, line) {
+    // Supprimer une éventuelle modale précédente
+    const old = document.getElementById('desserte-checkbox-modal');
+    if (old) old.remove();
+
+    const currentZoneIds = new Set(line.zoneIds || []);
+    const allDessertes = getAllDessertes();
+
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'desserte-checkbox-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
+
+    // Panneau
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:360px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const title = document.createElement('span');
+    title.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);';
+    title.textContent = 'Dessertes — ' + line.nom;
+    header.appendChild(title);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    // Barre de recherche
+    const searchRow = document.createElement('div');
+    searchRow.style.cssText = 'padding:6px 14px;';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Filtrer les dessertes...';
+    searchInput.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;';
+    searchRow.appendChild(searchInput);
+    panel.appendChild(searchRow);
+
+    // Liste scrollable
+    const listDiv = document.createElement('div');
+    listDiv.style.cssText = 'overflow-y:auto;flex:1;padding:4px 0;';
+    panel.appendChild(listDiv);
+
+    // Compteur sélection
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:8px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const countEl = document.createElement('span');
+    countEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--muted);';
+    footer.appendChild(countEl);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'padding:5px 16px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+    saveBtn.textContent = 'Enregistrer';
+    footer.appendChild(saveBtn);
+    panel.appendChild(footer);
+
+    // État des sélections
+    const selected = new Set(currentZoneIds);
+
+    function updateCount() {
+      countEl.textContent = selected.size + ' desserte' + (selected.size > 1 ? 's' : '') + ' sélectionnée' + (selected.size > 1 ? 's' : '');
+    }
+
+    function renderCheckboxList(filter) {
+      listDiv.innerHTML = '';
+      const q = normalize(filter || '');
+
+      const sorted = [...allDessertes].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+      sorted.forEach(d => {
+        if (q && !normalize(d.nom).includes(q)) return;
+
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 14px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text);';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.has(d.id);
+        cb.style.cssText = 'accent-color:var(--accent2);cursor:pointer;flex-shrink:0;';
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(d.id);
+          else selected.delete(d.id);
+          updateCount();
+        });
+        row.appendChild(cb);
+
+        const label = document.createElement('span');
+        label.textContent = d.nom;
+        label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        row.appendChild(label);
+
+        listDiv.appendChild(row);
+      });
+    }
+
+    searchInput.addEventListener('input', () => renderCheckboxList(searchInput.value));
+
+    saveBtn.addEventListener('click', () => {
+      const freshLayout = getLayout();
+      freshLayout.tables.forEach(t => (t.lines || []).forEach(l => {
+        if (l.id === line.id) {
+          l.zoneIds = [...selected];
+        }
+      }));
+      saveLayoutObj(freshLayout);
+      overlay.remove();
+      renderTab('lignes');
+    });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    renderCheckboxList('');
+    updateCount();
+    searchInput.focus();
   }
 
   // =========================================
