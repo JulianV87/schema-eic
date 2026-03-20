@@ -717,6 +717,20 @@ const Settings = (() => {
     return getAllElementsByType('pn');
   }
 
+  // === AUTO-REMPLISSAGE SECTEUR SELON DESSERTE ===
+  const DESSERTE_SECTEUR_MAP = {
+    'paris nord grandes lignes': '1 GL',
+  };
+
+  function autoFillSecteur(gareName, inputs) {
+    if (!inputs || !inputs.secteur) return;
+    const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
+    const secteur = DESSERTE_SECTEUR_MAP[norm(gareName)];
+    if (secteur) {
+      inputs.secteur.value = secteur;
+    }
+  }
+
   function renderInfraTab(container, elType, label) {
     const elements = getAllElementsByType(elType);
 
@@ -922,12 +936,16 @@ const Settings = (() => {
               e.preventDefault();
               input.value = d.nom;
               dropdown.classList.add('hidden');
+              autoFillSecteur(d.nom, inputs);
             });
             dropdown.appendChild(opt);
           });
           dropdown.classList.remove('hidden');
         });
-        input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+        input.addEventListener('blur', () => {
+          setTimeout(() => dropdown.classList.add('hidden'), 150);
+          autoFillSecteur(input.value, inputs);
+        });
       } else {
         const input = document.createElement('input');
         input.type = 'text';
