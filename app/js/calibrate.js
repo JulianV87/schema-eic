@@ -756,6 +756,7 @@ const Calibrate = (() => {
     container.addEventListener('mousemove', onDebugHoverCheck);
     // Écouter les clics sur le container pour sélectionner (en mode debug)
     container.addEventListener('click', onDebugContainerClick);
+    container.addEventListener('contextmenu', onDebugContextMenu);
     // Les events de drag se font sur le canvas quand pointer-events est activé
     debugCanvas.addEventListener('mousedown', onDebugMouseDown);
     debugCanvas.addEventListener('mousemove', onDebugMouseMove);
@@ -768,6 +769,7 @@ const Calibrate = (() => {
     if (container) {
       container.removeEventListener('mousemove', onDebugHoverCheck);
       container.removeEventListener('click', onDebugContainerClick);
+      container.removeEventListener('contextmenu', onDebugContextMenu);
     }
     if (debugCanvas) {
       debugCanvas.removeEventListener('mousedown', onDebugMouseDown);
@@ -1071,6 +1073,109 @@ const Calibrate = (() => {
     const clicked = findNearbyElement(vp.x, vp.y);
     selectedElementId = clicked ? clicked.id : null;
     redrawDebugOverlay();
+  }
+
+  // Clic droit → menu contextuel pour supprimer/modifier
+  function onDebugContextMenu(e) {
+    if (!debugOverlay) return;
+
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+    const rect = document.getElementById('osd-viewer').getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(mx, my));
+
+    const clicked = findNearbyElement(vp.x, vp.y);
+    if (!clicked) return;
+
+    e.preventDefault();
+    selectedElementId = clicked.id;
+    redrawDebugOverlay();
+
+    // Fermer un menu existant
+    const old = document.getElementById('debug-context-menu');
+    if (old) old.remove();
+
+    const color = TYPE_COLORS[clicked.type] || TYPE_COLORS.autre;
+    const hasShape = clicked.shape && clicked.shape.bounds;
+
+    const menu = document.createElement('div');
+    menu.id = 'debug-context-menu';
+    menu.style.cssText = `
+      position:fixed; left:${e.clientX}px; top:${e.clientY}px; z-index:320;
+      background:#0c1220; border:1px solid #2a4266; border-radius:6px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.6); font-family:'JetBrains Mono',monospace;
+      font-size:11px; min-width:200px; overflow:hidden;
+    `;
+
+    // Titre
+    const title = document.createElement('div');
+    title.style.cssText = `padding:6px 12px;color:${color};font-weight:600;border-bottom:1px solid #1e304a;font-size:12px;`;
+    title.textContent = clicked.identifiant || clicked.id;
+    menu.appendChild(title);
+
+    const items = [];
+
+    if (hasShape) {
+      items.push({
+        label: 'Supprimer la zone', icon: '▭✕', danger: false,
+        action: () => {
+          delete clicked.shape;
+          Data.saveManualElement(clicked);
+          selectedElementId = null;
+          redrawDebugOverlay();
+        }
+      });
+      items.push({
+        label: 'Réinitialiser la rotation', icon: '↺', danger: false,
+        action: () => {
+          if (clicked.shape) clicked.shape.rotation = 0;
+          Data.saveManualElement(clicked);
+          redrawDebugOverlay();
+        }
+      });
+    }
+
+    items.push({
+      label: 'Modifier (popup calibration)', icon: '✎',
+      action: () => {
+        pendingCoords = { x: clicked.x_pct, y: clicked.y_pct };
+        pendingShape = clicked.shape || null;
+        openCalibrationPopup(clicked);
+      }
+    });
+
+    items.push({
+      label: 'Supprimer l\'élément', icon: '✕', danger: true,
+      action: () => {
+        if (!confirm(`Supprimer définitivement "${clicked.identifiant}" ?`)) return;
+        Data.deleteManualElement(clicked.id);
+        selectedElementId = null;
+        redrawDebugOverlay();
+      }
+    });
+
+    items.forEach(a => {
+      const el = document.createElement('div');
+      el.style.cssText = `padding:7px 12px;cursor:pointer;color:${a.danger ? '#ff4040' : '#c8daf5'};display:flex;align-items:center;gap:8px;transition:background 0.1s;`;
+      el.innerHTML = `<span style="width:18px;text-align:center;font-size:11px;">${a.icon}</span>${a.label}`;
+      el.addEventListener('mouseenter', () => { el.style.background = '#111a2e'; });
+      el.addEventListener('mouseleave', () => { el.style.background = 'none'; });
+      el.addEventListener('click', () => { menu.remove(); a.action(); });
+      menu.appendChild(el);
+    });
+
+    document.body.appendChild(menu);
+
+    // Fermer au clic ailleurs
+    const close = (ev) => {
+      if (!menu.contains(ev.target)) {
+        menu.remove();
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
   }
 
   // Quand la souris quitte le canvas, désactiver pointer-events
