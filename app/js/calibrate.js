@@ -5,6 +5,16 @@
 const Calibrate = (() => {
   let active = false;
   let pendingCoords = null;
+  let pendingShape = null;  // { type, bounds, contour } — forme dessinée
+
+  // État du dessin de forme
+  let shapeMode = 'point';  // 'point', 'rectangle', 'circle', 'free'
+  let selOverlay = null;
+  let selCanvas = null;
+  let dragStart = null;
+  let currentRect = null;
+  let freePoints = [];
+  let isDrawingFree = false;
 
   function init() {
     const btn = document.getElementById('btn-calibrate');
@@ -19,11 +29,14 @@ const Calibrate = (() => {
         if (Annotations.setActiveTool) Annotations.setActiveTool(null);
         if (typeof MagicWand !== 'undefined' && MagicWand.setActive) MagicWand.setActive(false);
         document.getElementById('osd-viewer').style.cursor = 'crosshair';
-        showStatusMsg('Mode calibration — cliquez sur un élément du schéma pour l\'identifier');
+        showShapePicker();
+        showStatusMsg('Mode calibration — sélectionnez un mode puis dessinez sur le schéma');
         enableCalibrationClick();
       } else {
         document.getElementById('osd-viewer').style.cursor = '';
         hideStatusMsg();
+        hideShapePicker();
+        cancelShapeDrawing();
         disableCalibrationClick();
       }
     });
@@ -75,6 +88,7 @@ const Calibrate = (() => {
 
   function onCalibrationClick(event) {
     if (!active) return;
+    if (shapeMode !== 'point') return; // Les autres modes utilisent l'overlay
     // Ne pas intercepter si un outil d'annotation ou la baguette magique est actif
     if (Annotations.getActiveTool && Annotations.getActiveTool()) return;
     if (typeof MagicWand !== 'undefined' && MagicWand.isActive()) return;
@@ -85,15 +99,23 @@ const Calibrate = (() => {
     const viewportPoint = viewer.viewport.pointFromPixel(event.position);
 
     pendingCoords = { x: viewportPoint.x, y: viewportPoint.y };
+    pendingShape = null;
 
-    // Chercher si un élément extrait existe déjà proche de ce point
     const nearby = findNearbyElement(viewportPoint.x, viewportPoint.y);
+    openCalibrationPopup(nearby);
+  }
 
-    // Remplir le formulaire
+  function openCalibrationPopup(nearby) {
     const popup = document.getElementById('calibrate-popup');
-    popup.dataset.contour = ''; // Nettoyer tout contour stale de la baguette magique
-    document.getElementById('calibrate-coords').textContent =
-      `x: ${viewportPoint.x.toFixed(6)}  y: ${viewportPoint.y.toFixed(6)}`;
+    popup.dataset.contour = '';
+
+    // Afficher les coordonnées + info sur la forme
+    let coordsText = `x: ${pendingCoords.x.toFixed(6)}  y: ${pendingCoords.y.toFixed(6)}`;
+    if (pendingShape) {
+      const labels = { rectangle: '▭', circle: '○', free: '✏' };
+      coordsText += ` · ${labels[pendingShape.type] || ''} forme capturée`;
+    }
+    document.getElementById('calibrate-coords').textContent = coordsText;
 
     if (nearby) {
       document.getElementById('calibrate-type').value = nearby.type || 'autre';
@@ -102,7 +124,6 @@ const Calibrate = (() => {
       document.getElementById('calibrate-ligne').value = nearby.ligne || '';
       document.getElementById('calibrate-pk').value = nearby.pk || '';
       document.getElementById('calibrate-secteur').value = nearby.secteur || '';
-      // Stocker l'id pour la mise à jour
       popup.dataset.editId = nearby.id;
     } else {
       document.getElementById('calibrate-type').value = 'aiguille';
@@ -114,9 +135,7 @@ const Calibrate = (() => {
       popup.dataset.editId = '';
     }
 
-    // Remplir le datalist des lignes depuis le layout
     populateLigneList();
-
     popup.classList.remove('hidden');
     document.getElementById('calibrate-id').focus();
   }
@@ -197,13 +216,15 @@ const Calibrate = (() => {
       element.zone_id = null;
     }
 
-    // Si la baguette magique a capturé un contour, le sauvegarder
-    const contourData = popup.dataset.contour;
-    if (contourData) {
-      try {
-        element.shape = JSON.parse(contourData);
-      } catch {}
-      popup.dataset.contour = '';
+    // Sauvegarder la forme dessinée (rectangle, cercle, libre) ou le contour baguette magique
+    if (pendingShape) {
+      element.shape = pendingShape;
+    } else {
+      const contourData = popup.dataset.contour;
+      if (contourData) {
+        try { element.shape = JSON.parse(contourData); } catch {}
+        popup.dataset.contour = '';
+      }
     }
 
     Data.saveManualElement(element);
@@ -243,6 +264,295 @@ const Calibrate = (() => {
 
   function closePopup() {
     document.getElementById('calibrate-popup').classList.add('hidden');
+    pendingShape = null;
+    // Relancer le dessin si toujours en mode forme
+    if (active && shapeMode !== 'point') {
+      startShapeDrawing(shapeMode);
+    }
+  }
+
+  // === SÉLECTEUR DE FORME ===
+
+  function showShapePicker() {
+    let picker = document.getElementById('calibrate-shape-picker');
+    if (picker) return;
+
+    const container = document.getElementById('viewer-container');
+    picker = document.createElement('div');
+    picker.id = 'calibrate-shape-picker';
+    picker.style.cssText = `
+      position:absolute; top:8px; right:12px; z-index:30;
+      background:rgba(12,18,32,0.95); border:1px solid #2a4266; border-radius:6px;
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+      display:flex; gap:2px; padding:3px;
+    `;
+
+    const modes = [
+      { id: 'point', icon: '·', label: 'Point' },
+      { id: 'rectangle', icon: '▭', label: 'Rectangle' },
+      { id: 'circle', icon: '○', label: 'Cercle' },
+      { id: 'free', icon: '✏', label: 'Libre' },
+    ];
+
+    modes.forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'calibrate-shape-btn' + (m.id === shapeMode ? ' active' : '');
+      btn.dataset.mode = m.id;
+      btn.title = m.label;
+      btn.style.cssText = `
+        padding:5px 10px; border:1px solid transparent; border-radius:4px;
+        background:${m.id === shapeMode ? '#1e304a' : 'none'}; color:${m.id === shapeMode ? '#ff9520' : '#4a6a9a'};
+        cursor:pointer; font-size:13px; transition:all 0.15s;
+      `;
+      btn.textContent = m.icon + ' ' + m.label;
+      btn.addEventListener('click', () => {
+        setShapeMode(m.id);
+      });
+      btn.addEventListener('mouseenter', () => {
+        if (m.id !== shapeMode) btn.style.color = '#c8daf5';
+      });
+      btn.addEventListener('mouseleave', () => {
+        if (m.id !== shapeMode) btn.style.color = '#4a6a9a';
+      });
+      picker.appendChild(btn);
+    });
+
+    container.appendChild(picker);
+  }
+
+  function hideShapePicker() {
+    const picker = document.getElementById('calibrate-shape-picker');
+    if (picker) picker.remove();
+  }
+
+  function setShapeMode(mode) {
+    shapeMode = mode;
+    cancelShapeDrawing();
+
+    // Mettre à jour les boutons
+    const picker = document.getElementById('calibrate-shape-picker');
+    if (picker) {
+      picker.querySelectorAll('button').forEach(btn => {
+        const isActive = btn.dataset.mode === mode;
+        btn.style.background = isActive ? '#1e304a' : 'none';
+        btn.style.color = isActive ? '#ff9520' : '#4a6a9a';
+      });
+    }
+
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    if (mode === 'point') {
+      showStatusMsg('Mode calibration — cliquez sur un élément');
+      enableCalibrationClick();
+    } else {
+      const labels = { rectangle: 'un rectangle', circle: 'un cercle', free: 'une forme libre' };
+      showStatusMsg(`Dessinez ${labels[mode]} autour de l'élément · Échap pour annuler`);
+      disableCalibrationClick();
+      startShapeDrawing(mode);
+    }
+  }
+
+  // === DESSIN DE FORME SUR LE SCHÉMA ===
+
+  function startShapeDrawing(shape) {
+    cancelShapeDrawing();
+
+    const container = document.getElementById('viewer-container');
+    dragStart = null;
+    currentRect = null;
+    freePoints = [];
+    isDrawingFree = false;
+
+    // Overlay pour capturer les events souris
+    selOverlay = document.createElement('div');
+    selOverlay.id = 'calibrate-sel-overlay';
+    selOverlay.style.cssText = `
+      position:absolute; top:0; left:0; width:100%; height:100%;
+      z-index:20; cursor:crosshair;
+    `;
+    container.appendChild(selOverlay);
+
+    // Canvas pour dessiner la sélection
+    selCanvas = document.createElement('canvas');
+    selCanvas.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:21;';
+    selCanvas.width = container.offsetWidth;
+    selCanvas.height = container.offsetHeight;
+    selOverlay.appendChild(selCanvas);
+
+    selOverlay.addEventListener('mousedown', onShapeMouseDown);
+    selOverlay.addEventListener('mousemove', onShapeMouseMove);
+    selOverlay.addEventListener('mouseup', onShapeMouseUp);
+
+    const cancelHandler = (e) => {
+      if (e.key === 'Escape') {
+        cancelShapeDrawing();
+        if (active) setShapeMode('point');
+        document.removeEventListener('keydown', cancelHandler);
+      }
+    };
+    document.addEventListener('keydown', cancelHandler);
+  }
+
+  function cancelShapeDrawing() {
+    dragStart = null;
+    currentRect = null;
+    freePoints = [];
+    isDrawingFree = false;
+    if (selOverlay) { selOverlay.remove(); selOverlay = null; }
+    selCanvas = null;
+  }
+
+  function onShapeMouseDown(e) {
+    const rect = selOverlay.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (shapeMode === 'free') {
+      isDrawingFree = true;
+      freePoints = [{ x, y }];
+    } else {
+      dragStart = { x, y };
+    }
+  }
+
+  function onShapeMouseMove(e) {
+    if (!selCanvas) return;
+    const rect = selOverlay.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const ctx = selCanvas.getContext('2d');
+    ctx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+
+    if (shapeMode === 'free' && isDrawingFree) {
+      freePoints.push({ x, y });
+      drawFreePreview(ctx);
+    } else if (dragStart) {
+      if (shapeMode === 'circle') {
+        const dx = x - dragStart.x;
+        const dy = y - dragStart.y;
+        const radius = Math.sqrt(dx * dx + dy * dy);
+        currentRect = { cx: dragStart.x, cy: dragStart.y, radius };
+        drawCirclePreview(ctx, currentRect);
+      } else {
+        const sx = Math.min(dragStart.x, x);
+        const sy = Math.min(dragStart.y, y);
+        currentRect = { x: sx, y: sy, w: Math.abs(x - dragStart.x), h: Math.abs(y - dragStart.y) };
+        drawRectPreview(ctx, currentRect);
+      }
+    }
+  }
+
+  function onShapeMouseUp(e) {
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    let shapeBounds = null;  // en pixels CSS
+    let shapeContour = null; // en coordonnées viewport OSD
+
+    if (shapeMode === 'free') {
+      isDrawingFree = false;
+      if (freePoints.length < 5) { cancelShapeDrawing(); startShapeDrawing('free'); return; }
+
+      const minX = Math.min(...freePoints.map(p => p.x));
+      const minY = Math.min(...freePoints.map(p => p.y));
+      const maxX = Math.max(...freePoints.map(p => p.x));
+      const maxY = Math.max(...freePoints.map(p => p.y));
+      shapeBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+
+      // Convertir en coordonnées viewport
+      shapeContour = freePoints.map(p => {
+        const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(p.x, p.y));
+        return { x: vp.x, y: vp.y };
+      });
+    } else if (shapeMode === 'circle') {
+      if (!currentRect || currentRect.radius < 5) { cancelShapeDrawing(); startShapeDrawing('circle'); return; }
+      const r = currentRect.radius;
+      shapeBounds = { x: currentRect.cx - r, y: currentRect.cy - r, w: r * 2, h: r * 2 };
+    } else {
+      if (!currentRect || currentRect.w < 5 || currentRect.h < 5) { cancelShapeDrawing(); startShapeDrawing('rectangle'); return; }
+      shapeBounds = { ...currentRect };
+    }
+
+    // Calculer le centre en coordonnées viewport OSD
+    const centerX = shapeBounds.x + shapeBounds.w / 2;
+    const centerY = shapeBounds.y + shapeBounds.h / 2;
+    const vpCenter = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(centerX, centerY));
+
+    // Convertir les bounds en viewport
+    const vpTopLeft = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(shapeBounds.x, shapeBounds.y));
+    const vpBottomRight = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(shapeBounds.x + shapeBounds.w, shapeBounds.y + shapeBounds.h));
+
+    pendingCoords = { x: vpCenter.x, y: vpCenter.y };
+    pendingShape = {
+      type: shapeMode,
+      bounds: { x: vpTopLeft.x, y: vpTopLeft.y, w: vpBottomRight.x - vpTopLeft.x, h: vpBottomRight.y - vpTopLeft.y },
+      contour: shapeContour || null,
+    };
+
+    cancelShapeDrawing();
+
+    // Chercher un élément existant dans la zone
+    const nearby = findNearbyElement(vpCenter.x, vpCenter.y);
+
+    // Ouvrir le popup
+    openCalibrationPopup(nearby);
+
+    // Relancer le dessin pour le prochain élément
+    // (sera fait après fermeture du popup ou automatiquement)
+  }
+
+  function drawRectPreview(ctx, r) {
+    ctx.save();
+    ctx.strokeStyle = '#ff9520';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = 'rgba(255,149,32,0.1)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.setLineDash([]);
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#ff9520';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.round(r.w)} × ${Math.round(r.h)}`, r.x + r.w / 2, r.y + r.h + 14);
+    ctx.restore();
+  }
+
+  function drawCirclePreview(ctx, c) {
+    ctx.save();
+    ctx.strokeStyle = '#ff9520';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.arc(c.cx, c.cy, c.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,149,32,0.1)';
+    ctx.fill();
+    ctx.setLineDash([]);
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#ff9520';
+    ctx.textAlign = 'center';
+    ctx.fillText(`r=${Math.round(c.radius)}px`, c.cx, c.cy + c.radius + 14);
+    ctx.restore();
+  }
+
+  function drawFreePreview(ctx) {
+    if (freePoints.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = '#ff9520';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(freePoints[0].x, freePoints[0].y);
+    for (let i = 1; i < freePoints.length; i++) {
+      ctx.lineTo(freePoints[i].x, freePoints[i].y);
+    }
+    ctx.lineTo(freePoints[0].x, freePoints[0].y);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,149,32,0.08)';
+    ctx.fill();
+    ctx.restore();
   }
 
   function showStatusMsg(msg) {
