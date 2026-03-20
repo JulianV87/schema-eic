@@ -91,7 +91,9 @@ const Settings = (() => {
     container.innerHTML = '';
 
     if (activeTab === 'dessertes') renderDessertes(container);
-    else if (activeTab === 'pn') renderPN(container);
+    else if (activeTab === 'pn') renderInfraTab(container, 'pn', 'PN');
+    else if (activeTab === 'signaux') renderInfraTab(container, 'signal', 'Signal');
+    else if (activeTab === 'aiguilles') renderInfraTab(container, 'aiguille', 'Aiguille');
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
 
@@ -689,45 +691,48 @@ const Settings = (() => {
   // PN
   // =========================================
 
-  function getAllPNs() {
+  function getAllElementsByType(elType) {
     // Dédoublonnage par id ET par position
     const seenIds = new Set();
     const seenPos = new Set();
-    const allPNs = [];
+    const results = [];
     Data.searchElementFuzzy('').forEach(el => {
-      if (el.type !== 'pn') return;
+      if (el.type !== elType) return;
       if (seenIds.has(el.id)) return;
       const posKey = Math.round(el.x_pct * 300) + ',' + Math.round(el.y_pct * 300);
       if (seenPos.has(posKey)) return;
       seenIds.add(el.id);
       seenPos.add(posKey);
-      allPNs.push(el);
+      results.push(el);
     });
-    allPNs.sort((a, b) => {
+    results.sort((a, b) => {
       const na = parseInt((a.identifiant || '').match(/\d+/)?.[0] || '0');
       const nb = parseInt((b.identifiant || '').match(/\d+/)?.[0] || '0');
       return na - nb;
     });
-    return allPNs;
+    return results;
   }
 
-  function renderPN(container) {
-    const pns = getAllPNs();
-    const gares = Data.getGares();
+  function getAllPNs() {
+    return getAllElementsByType('pn');
+  }
+
+  function renderInfraTab(container, elType, label) {
+    const elements = getAllElementsByType(elType);
 
     // Stats
     const stats = document.createElement('div');
     stats.style.cssText = 'padding:4px 0 8px;font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;gap:12px;';
-    const validated = pns.filter(p => p.validated).length;
-    stats.innerHTML = `<span>Total: <b style="color:var(--text)">${pns.length}</b></span>` +
+    const validated = elements.filter(p => p.validated).length;
+    stats.innerHTML = `<span>Total: <b style="color:var(--text)">${elements.length}</b></span>` +
       `<span>Validés: <b style="color:var(--accent2)">${validated}</b></span>` +
-      `<span>À vérifier: <b style="color:var(--warn)">${pns.length - validated}</b></span>`;
+      `<span>À vérifier: <b style="color:var(--warn)">${elements.length - validated}</b></span>`;
     container.appendChild(stats);
 
     // Barre de recherche
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
-    searchInput.placeholder = 'Chercher un PN (ex: 11, 24, SAL4...)';
+    searchInput.placeholder = `Chercher un ${label.toLowerCase()}...`;
     searchInput.className = 'zone-picker-search';
     searchInput.style.cssText = 'margin-bottom:6px;border:1px solid var(--border);border-radius:3px;';
     container.appendChild(searchInput);
@@ -739,15 +744,16 @@ const Settings = (() => {
       listDiv.innerHTML = '';
       const q = (filter || '').toLowerCase().trim();
 
-      pns.forEach(pn => {
+      elements.forEach(el => {
         if (q) {
-          const match = pn.identifiant.toLowerCase().includes(q) ||
-            (pn.pn_type || '').toLowerCase().includes(q) ||
-            (pn.raw_text || '').toLowerCase().includes(q);
+          const match = el.identifiant.toLowerCase().includes(q) ||
+            (el.pn_type || '').toLowerCase().includes(q) ||
+            (el.raw_text || '').toLowerCase().includes(q) ||
+            (el.secteur || '').toLowerCase().includes(q);
           if (!match) return;
         }
 
-        const gare = pn.gare_id ? (Data.getGare(pn.gare_id) || Data.getAllDessertes().get(pn.gare_id) || null) : null;
+        const gare = el.gare_id ? (Data.getGare(el.gare_id) || Data.getAllDessertes().get(el.gare_id) || null) : null;
 
         const item = document.createElement('div');
         item.className = 'settings-item';
@@ -756,72 +762,71 @@ const Settings = (() => {
         // Indicateur validé
         const dot = document.createElement('span');
         dot.style.cssText = 'font-size:8px;flex-shrink:0;width:8px;';
-        dot.style.color = pn.validated ? 'var(--accent2)' : 'var(--warn)';
+        dot.style.color = el.validated ? 'var(--accent2)' : 'var(--warn)';
         dot.textContent = '●';
-        dot.title = pn.validated ? 'Validé' : 'À vérifier';
+        dot.title = el.validated ? 'Validé' : 'À vérifier';
         item.appendChild(dot);
 
         // Identifiant
         const id = document.createElement('span');
         id.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--text);font-weight:600;min-width:65px;flex-shrink:0;';
-        id.textContent = pn.identifiant;
+        id.textContent = el.identifiant;
         item.appendChild(id);
 
-        // Type (SAL2, SAL4, etc.)
-        if (pn.pn_type) {
+        // Sous-type (SAL2, SAL4, etc.) si applicable
+        if (el.pn_type) {
           const type = document.createElement('span');
           type.style.cssText = 'font-family:var(--mono);font-size:9px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
-          type.textContent = pn.pn_type;
+          type.textContent = el.pn_type;
           item.appendChild(type);
         }
 
         // Desserte associée
         const gareName = document.createElement('span');
         gareName.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        gareName.textContent = gare ? gare.nom : (pn.gare_id ? '?' : '—');
+        gareName.textContent = gare ? gare.nom : (el.gare_id ? '?' : '—');
         item.appendChild(gareName);
 
         // Ligne
-        if (pn.ligne) {
+        if (el.ligne) {
           const ligne = document.createElement('span');
           ligne.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);flex-shrink:0;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-          ligne.textContent = pn.ligne;
+          ligne.textContent = el.ligne;
           item.appendChild(ligne);
         }
 
         // Bouton sauvegarder vue
-        const pnHasView = Data.hasSavedView(pn.id);
+        const hasView = Data.hasSavedView(el.id);
         const saveViewBtn = document.createElement('button');
         saveViewBtn.className = 'zone-item-btn';
         saveViewBtn.textContent = '📌';
-        saveViewBtn.title = pnHasView ? 'Vue sauvegardée — clic pour mettre à jour' : 'Sauvegarder la vue actuelle';
-        saveViewBtn.style.opacity = pnHasView ? '1' : '0.4';
+        saveViewBtn.title = hasView ? 'Vue sauvegardée — clic pour mettre à jour' : 'Sauvegarder la vue actuelle';
+        saveViewBtn.style.opacity = hasView ? '1' : '0.4';
         saveViewBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          Viewer.saveCurrentViewForZone(pn.id);
+          Viewer.saveCurrentViewForZone(el.id);
           saveViewBtn.style.opacity = '1';
           saveViewBtn.textContent = '✓';
           setTimeout(() => { saveViewBtn.textContent = '📌'; }, 1500);
         });
         item.appendChild(saveViewBtn);
 
-        // Clic gauche → naviguer (via vue sauvegardée ou position)
+        // Clic gauche → naviguer
         item.addEventListener('click', (e) => {
           if (e.target.closest('button')) return;
-          listDiv.querySelectorAll('.settings-item').forEach(el => el.classList.remove('active'));
+          listDiv.querySelectorAll('.settings-item').forEach(it => it.classList.remove('active'));
           item.classList.add('active');
-          // Si une vue est sauvegardée, l'utiliser
-          if (Data.hasSavedView(pn.id)) {
-            Viewer.showZone(pn.id, pn.identifiant);
+          if (Data.hasSavedView(el.id)) {
+            Viewer.showZone(el.id, el.identifiant);
           } else {
-            Viewer.panTo(pn.x_pct, pn.y_pct, 12);
+            Viewer.panTo(el.x_pct, el.y_pct, 12);
           }
         });
 
         // Clic droit → menu contextuel
         item.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          showPNContextMenu(e, pn, gare);
+          showPNContextMenu(e, el, gare);
         });
 
         listDiv.appendChild(item);
@@ -986,7 +991,7 @@ const Settings = (() => {
 
       Data.saveManualElement(pn);
       menu.remove();
-      renderTab('pn');
+      renderTab(activeTab);
     });
     btnRow.appendChild(saveBtn);
 
@@ -997,7 +1002,7 @@ const Settings = (() => {
       pn.validated = !pn.validated;
       Data.saveManualElement(pn);
       menu.remove();
-      renderTab('pn');
+      renderTab(activeTab);
     });
     btnRow.appendChild(validateBtn);
 
@@ -1020,7 +1025,7 @@ const Settings = (() => {
       if (!confirm(`Supprimer ${pn.identifiant} ?`)) return;
       Data.deleteManualElement(pn.id);
       menu.remove();
-      renderTab('pn');
+      renderTab(activeTab);
     });
     btnRow.appendChild(delBtn);
 
@@ -1091,7 +1096,7 @@ const Settings = (() => {
         pn.gare_id = null;
         Data.saveManualElement(pn);
         menu.remove();
-        renderTab('pn');
+        renderTab(activeTab);
       });
       listDiv.appendChild(noneItem);
 
@@ -1109,7 +1114,7 @@ const Settings = (() => {
           pn.gare_id = d.id;
           Data.saveManualElement(pn);
           menu.remove();
-          renderTab('pn');
+          renderTab(activeTab);
         });
         listDiv.appendChild(item);
       });
