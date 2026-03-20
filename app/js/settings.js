@@ -747,7 +747,7 @@ const Settings = (() => {
           if (!match) return;
         }
 
-        const gare = pn.gare_id ? Data.getGare(pn.gare_id) : null;
+        const gare = pn.gare_id ? (Data.getGare(pn.gare_id) || Data.getAllDessertes().get(pn.gare_id) || null) : null;
 
         const item = document.createElement('div');
         item.className = 'settings-item';

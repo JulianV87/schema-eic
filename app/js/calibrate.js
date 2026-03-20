@@ -164,7 +164,7 @@ const Calibrate = (() => {
 
   function getGareName(gareId) {
     if (!gareId) return '';
-    const gare = Data.getGare(gareId);
+    const gare = Data.getGare(gareId) || Data.getAllDessertes().get(gareId) || null;
     return gare ? gare.nom : '';
   }
 
