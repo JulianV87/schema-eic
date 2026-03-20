@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "generate-tiles": "node scripts/generate_tiles.js",
-    "extract-data": "node scripts/extract_data.js",
+    "extract-data": "python scripts/extract_data.py",
     "serve": "npx http-server app -p 8080 -c-1"
   },
   "dependencies": {

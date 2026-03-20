@@ -241,7 +241,8 @@ const Viewer = (() => {
     currentZone = zone || { id: zoneId, nom: name, gares: [] };
     const navLabel = document.getElementById('nav-zone-label');
     if (navLabel) navLabel.textContent = name;
-    document.getElementById('sidebar-zone').textContent = name;
+    const sidebarZone = document.getElementById('sidebar-zone');
+    if (sidebarZone) sidebarZone.textContent = name;
 
     // Vérifier si une vue calibrée existe pour ce secteur
     const savedView = getSavedZoneView(zoneId);

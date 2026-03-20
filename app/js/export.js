@@ -17,6 +17,8 @@ const Export = (() => {
   let freePoints = [];
   let isDrawingFree = false;
 
+  const BANNER_HEIGHT = 36;
+
   function init() {
     const pngBtn = document.getElementById('btn-export-png');
     const clearBtn = document.getElementById('btn-clear');
@@ -46,6 +48,7 @@ const Export = (() => {
       ? document.getElementById('btn-export-clipboard')
       : document.getElementById('btn-export-png');
 
+    if (!btn) return;
     const btnRect = btn.getBoundingClientRect();
 
     const menu = document.createElement('div');
@@ -315,7 +318,6 @@ const Export = (() => {
 
     // Appliquer masque circulaire
     const ctx = canvas.getContext('2d');
-    const bannerHeight = 36;
 
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = canvas.width;
@@ -325,10 +327,10 @@ const Export = (() => {
     // Cercle blanc = zone visible
     maskCtx.fillStyle = '#fff';
     maskCtx.beginPath();
-    maskCtx.arc(canvas.width / 2, (canvas.height - bannerHeight) / 2, canvas.width / 2, 0, Math.PI * 2);
+    maskCtx.arc(canvas.width / 2, (canvas.height - BANNER_HEIGHT) / 2, canvas.width / 2, 0, Math.PI * 2);
     maskCtx.fill();
     // Bandeau toujours visible
-    maskCtx.fillRect(0, canvas.height - bannerHeight, canvas.width, bannerHeight);
+    maskCtx.fillRect(0, canvas.height - BANNER_HEIGHT, canvas.width, BANNER_HEIGHT);
 
     ctx.globalCompositeOperation = 'destination-in';
     ctx.drawImage(maskCanvas, 0, 0);
@@ -355,7 +357,6 @@ const Export = (() => {
 
     // Appliquer le masque de forme libre
     const ctx = canvas.getContext('2d');
-    const bannerHeight = 36;
 
     // Créer un masque
     const maskCanvas = document.createElement('canvas');
@@ -379,7 +380,7 @@ const Export = (() => {
     maskCtx.closePath();
     maskCtx.fill();
     // Le bandeau en bas est toujours visible
-    maskCtx.fillRect(0, canvas.height - bannerHeight, canvas.width, bannerHeight);
+    maskCtx.fillRect(0, canvas.height - BANNER_HEIGHT, canvas.width, BANNER_HEIGHT);
 
     // Appliquer le masque avec destination-in
     ctx.globalCompositeOperation = 'destination-in';
@@ -442,10 +443,9 @@ const Export = (() => {
 
     if (sw <= 0 || sh <= 0) return null;
 
-    const bannerHeight = 36;
     const canvas = document.createElement('canvas');
     canvas.width = sw;
-    canvas.height = sh + bannerHeight;
+    canvas.height = sh + BANNER_HEIGHT;
     const ctx = canvas.getContext('2d');
 
     // Couche 1 : OSD
@@ -486,11 +486,11 @@ const Export = (() => {
     const zoneName = zone ? zone.nom : '';
 
     ctx.fillStyle = 'rgba(6,9,15,0.92)';
-    ctx.fillRect(0, sh, sw, bannerHeight);
+    ctx.fillRect(0, sh, sw, BANNER_HEIGHT);
     ctx.font = '12px "JetBrains Mono", monospace';
     ctx.fillStyle = '#4a6a9a';
     ctx.textAlign = 'center';
-    ctx.fillText(`EIC Paris Nord · ${dateStr} · ${zoneName}`, sw / 2, sh + bannerHeight / 2 + 4);
+    ctx.fillText(`EIC Paris Nord · ${dateStr} · ${zoneName}`, sw / 2, sh + BANNER_HEIGHT / 2 + 4);
     ctx.textAlign = 'start';
 
     return canvas;
@@ -563,7 +563,7 @@ const Export = (() => {
     const now = new Date();
     const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const zone = Viewer.getCurrentZone();
-    const name = zone ? zone.nom.replace(/[^a-zA-Z0-9]/g, '_') : 'schema';
+    const name = zone ? zone.nom.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '_') : 'schema';
     const link = document.createElement('a');
     link.download = `EIC_${name}_${ts}.png`;
     link.href = canvas.toDataURL('image/png');
