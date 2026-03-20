@@ -746,21 +746,34 @@ const Calibrate = (() => {
     const container = document.getElementById('viewer-container');
     debugCanvas = document.createElement('canvas');
     debugCanvas.id = 'calibrate-debug-canvas';
-    debugCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:11;cursor:pointer;';
+    // pointer-events:none par défaut → le schéma reste navigable
+    debugCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:11;pointer-events:none;';
     debugCanvas.width = container.offsetWidth;
     debugCanvas.height = container.offsetHeight;
     container.appendChild(debugCanvas);
 
+    // Écouter les mouvements sur le container pour détecter le survol des poignées
+    container.addEventListener('mousemove', onDebugHoverCheck);
+    // Écouter les clics sur le container pour sélectionner (en mode debug)
+    container.addEventListener('click', onDebugContainerClick);
+    // Les events de drag se font sur le canvas quand pointer-events est activé
     debugCanvas.addEventListener('mousedown', onDebugMouseDown);
     debugCanvas.addEventListener('mousemove', onDebugMouseMove);
     debugCanvas.addEventListener('mouseup', onDebugMouseUp);
+    debugCanvas.addEventListener('mouseleave', onDebugMouseLeave);
   }
 
   function destroyDebugCanvas() {
+    const container = document.getElementById('viewer-container');
+    if (container) {
+      container.removeEventListener('mousemove', onDebugHoverCheck);
+      container.removeEventListener('click', onDebugContainerClick);
+    }
     if (debugCanvas) {
       debugCanvas.removeEventListener('mousedown', onDebugMouseDown);
       debugCanvas.removeEventListener('mousemove', onDebugMouseMove);
       debugCanvas.removeEventListener('mouseup', onDebugMouseUp);
+      debugCanvas.removeEventListener('mouseleave', onDebugMouseLeave);
       debugCanvas.remove();
       debugCanvas = null;
     }
@@ -977,6 +990,53 @@ const Calibrate = (() => {
     return null;
   }
 
+  // Vérifie si la souris survole une poignée → active pointer-events sur le canvas
+  function onDebugHoverCheck(e) {
+    if (!debugCanvas || !selectedElementId || dragHandle) return;
+    const rect = debugCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const sel = Data.searchElementFuzzy('').find(el => el.id === selectedElementId);
+    if (!sel) return;
+
+    const handle = hitTestHandle(mx, my, sel);
+    if (handle) {
+      // Activer le canvas pour capturer le drag
+      debugCanvas.style.pointerEvents = 'auto';
+      debugCanvas.style.cursor = getHandleCursor(handle);
+    } else {
+      debugCanvas.style.pointerEvents = 'none';
+      debugCanvas.style.cursor = '';
+    }
+  }
+
+  // Clic sur le container (pas bloqué par le canvas) → sélectionner un élément
+  function onDebugContainerClick(e) {
+    if (!debugOverlay || dragHandle) return;
+    // Ignorer si le clic vient du canvas (poignée)
+    if (e.target === debugCanvas) return;
+
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+    const rect = document.getElementById('osd-viewer').getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const vp = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(mx, my));
+
+    const clicked = findNearbyElement(vp.x, vp.y);
+    selectedElementId = clicked ? clicked.id : null;
+    redrawDebugOverlay();
+  }
+
+  // Quand la souris quitte le canvas, désactiver pointer-events
+  function onDebugMouseLeave() {
+    if (!dragHandle) {
+      debugCanvas.style.pointerEvents = 'none';
+      debugCanvas.style.cursor = '';
+    }
+  }
+
   function onDebugMouseDown(e) {
     const rect = debugCanvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -1104,7 +1164,9 @@ const Calibrate = (() => {
     dragOrigin = null;
     dragOrigBounds = null;
     isRotating = false;
-    debugCanvas.style.cursor = 'pointer';
+    // Rendre le canvas transparent aux events → le schéma redevient navigable
+    debugCanvas.style.pointerEvents = 'none';
+    debugCanvas.style.cursor = '';
     redrawDebugOverlay();
   }
 
