@@ -208,7 +208,10 @@ const Annotations = (() => {
         const custom = customAnnotations[idx];
         if (!custom) return;
 
-        if (custom.placement === 'line') {
+        if (custom.placement === 'image' && custom.imageDataUrl) {
+          // Placer comme annotation image avec l'image uploadée
+          addImageAnnotation(viewportPoint.x, viewportPoint.y, custom.imageDataUrl, custom.name);
+        } else if (custom.placement === 'line') {
           if (!pendingFirstPoint) {
             pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
             showStatusMessage('Cliquez le 2ème point');
@@ -652,6 +655,7 @@ const Annotations = (() => {
         tool: 'custom-' + i,
         isCustom: true,
         placement: custom.placement,
+        imageDataUrl: custom.imageDataUrl || null,
       });
     });
 
@@ -673,7 +677,9 @@ const Annotations = (() => {
           const text = prompt('Texte :');
           if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
         } else if (opt.isCustom) {
-          if (opt.placement === 'line') {
+          if (opt.placement === 'image' && opt.imageDataUrl) {
+            addImageAnnotation(viewportPoint.x, viewportPoint.y, opt.imageDataUrl, opt.label);
+          } else if (opt.placement === 'line') {
             setActiveTool(opt.tool);
             pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
             showStatusMessage('Cliquez le 2ème point pour tracer la ligne');
@@ -1512,8 +1518,11 @@ const Annotations = (() => {
       const btn = document.createElement('div');
       btn.className = 'custom-tool-btn';
       btn.dataset.customIndex = index;
+      const iconHtml = custom.imageDataUrl
+        ? `<img src="${custom.imageDataUrl}" style="max-height:16px;max-width:24px;vertical-align:middle;">`
+        : `<span style="color:${custom.color}">${custom.symbol}</span>`;
       btn.innerHTML = `
-        <span class="tool-icon" style="color:${custom.color}">${custom.symbol}</span>
+        <span class="tool-icon">${iconHtml}</span>
         <span class="tool-label">${custom.name}</span>
         <button class="custom-tool-delete" title="Supprimer ce type">×</button>
       `;
@@ -1552,10 +1561,15 @@ const Annotations = (() => {
     let selectedSymbol = '●';
     let selectedColor = '#ff4040';
     let selectedPlacement = 'point';
+    let selectedImageDataUrl = null;
 
     // Reset
     document.getElementById('custom-name').value = '';
     document.getElementById('custom-symbol-text').value = '';
+    const imgPreview = document.getElementById('custom-image-preview');
+    if (imgPreview) imgPreview.classList.add('hidden');
+    const imgFile = document.getElementById('custom-image-file');
+    if (imgFile) imgFile.value = '';
     updatePreview();
 
     // Symbol picker
@@ -1565,6 +1579,8 @@ const Annotations = (() => {
         document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         selectedSymbol = btn.dataset.symbol;
+        selectedImageDataUrl = null;
+        clearImagePreview();
         document.getElementById('custom-symbol-text').value = '';
         updatePreview();
       };
@@ -1575,10 +1591,55 @@ const Annotations = (() => {
     document.getElementById('custom-symbol-text').addEventListener('input', (e) => {
       if (e.target.value) {
         selectedSymbol = e.target.value;
+        selectedImageDataUrl = null;
+        clearImagePreview();
         document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
         updatePreview();
       }
     });
+
+    // Image upload
+    const imageBtn = document.getElementById('custom-image-btn');
+    const imageFileInput = document.getElementById('custom-image-file');
+    const imagePreviewArea = document.getElementById('custom-image-preview');
+    const imageThumb = document.getElementById('custom-image-thumb');
+    const imageClearBtn = document.getElementById('custom-image-clear');
+
+    if (imageBtn) {
+      imageBtn.onclick = () => imageFileInput.click();
+    }
+    if (imageFileInput) {
+      imageFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          selectedImageDataUrl = ev.target.result;
+          selectedSymbol = '🖼';
+          document.querySelectorAll('.symbol-opt').forEach(b => b.classList.remove('selected'));
+          document.getElementById('custom-symbol-text').value = '';
+          if (imagePreviewArea) imagePreviewArea.classList.remove('hidden');
+          if (imageThumb) imageThumb.src = selectedImageDataUrl;
+          updatePreview();
+        };
+        reader.readAsDataURL(file);
+      };
+    }
+    if (imageClearBtn) {
+      imageClearBtn.onclick = () => {
+        selectedImageDataUrl = null;
+        clearImagePreview();
+        selectedSymbol = '●';
+        document.querySelectorAll('.symbol-opt')[0].classList.add('selected');
+        updatePreview();
+      };
+    }
+
+    function clearImagePreview() {
+      if (imagePreviewArea) imagePreviewArea.classList.add('hidden');
+      if (imageThumb) imageThumb.src = '';
+      if (imageFileInput) imageFileInput.value = '';
+    }
 
     // Color picker
     document.querySelectorAll('.color-opt').forEach(btn => {
@@ -1604,7 +1665,14 @@ const Annotations = (() => {
     function updatePreview() {
       const previewSymbol = document.getElementById('preview-symbol');
       const previewName = document.getElementById('preview-name');
-      if (previewSymbol) { previewSymbol.textContent = selectedSymbol; previewSymbol.style.color = selectedColor; }
+      if (previewSymbol) {
+        if (selectedImageDataUrl) {
+          previewSymbol.innerHTML = `<img src="${selectedImageDataUrl}" style="max-height:28px;max-width:48px;vertical-align:middle;">`;
+        } else {
+          previewSymbol.textContent = selectedSymbol;
+          previewSymbol.style.color = selectedColor;
+        }
+      }
       if (previewName) previewName.textContent = document.getElementById('custom-name').value || 'Annotation';
     }
 
@@ -1615,12 +1683,16 @@ const Annotations = (() => {
       const name = document.getElementById('custom-name').value.trim();
       if (!name) { document.getElementById('custom-name').focus(); return; }
 
-      customAnnotations.push({
+      const customDef = {
         name: name,
         symbol: selectedSymbol,
         color: selectedColor,
-        placement: selectedPlacement,
-      });
+        placement: selectedImageDataUrl ? 'image' : selectedPlacement,
+      };
+      if (selectedImageDataUrl) {
+        customDef.imageDataUrl = selectedImageDataUrl;
+      }
+      customAnnotations.push(customDef);
       saveCustomAnnotations();
       renderCustomButtons();
       popup.classList.add('hidden');

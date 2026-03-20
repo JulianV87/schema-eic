@@ -282,6 +282,16 @@
         </div>
         <input type="text" id="custom-symbol-text" placeholder="Ou tapez un symbole/emoji" maxlength="2">
 
+        <label class="custom-label">Ou importer une image</label>
+        <div class="custom-image-upload" id="custom-image-upload">
+          <input type="file" id="custom-image-file" accept="image/*" style="display:none">
+          <button type="button" id="custom-image-btn" class="btn-upload-image">📁 Choisir une image…</button>
+          <div id="custom-image-preview" class="custom-image-preview-area hidden">
+            <img id="custom-image-thumb" src="" alt="">
+            <button type="button" id="custom-image-clear" class="btn-clear-image">✕</button>
+          </div>
+        </div>
+
         <label class="custom-label">Couleur</label>
         <div class="custom-color-picker" id="custom-color-picker">
           <button class="color-opt" data-color="#ff4040" style="background:#ff4040"></button>
