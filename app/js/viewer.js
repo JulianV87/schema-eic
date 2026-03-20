@@ -28,7 +28,6 @@ const Viewer = (() => {
       maxZoomPixelRatio: 10,
       visibilityRatio: 0.5,
       constrainDuringPan: false,
-      homeFillsViewer: true,
       showZoomControl: false,
       showHomeControl: false,
       showFullPageControl: false,
@@ -109,12 +108,15 @@ const Viewer = (() => {
 
     let homeZoom = null;
 
-    // Stocker le zoom initial comme référence 100% et centrer le schéma
+    // Stocker le zoom initial comme référence 100% et restaurer la vue par défaut
     mainViewer.addHandler('open', () => {
       homeZoom = mainViewer.viewport.getHomeZoom();
-      // Centrer le schéma horizontalement (par défaut OSD l'aligne à gauche)
-      const bounds = mainViewer.viewport.getHomeBounds();
-      mainViewer.viewport.fitBounds(bounds, true);
+      // Restaurer la vue par défaut sauvegardée
+      const defaultView = Store.getJSON('eic_default_view', null);
+      if (defaultView) {
+        mainViewer.viewport.panTo(new OpenSeadragon.Point(defaultView.x, defaultView.y), true);
+        mainViewer.viewport.zoomTo(defaultView.zoom, null, true);
+      }
       updateZoomLevel();
     });
 
@@ -129,7 +131,23 @@ const Viewer = (() => {
     });
 
     zoomFitBtn.addEventListener('click', () => {
-      mainViewer.viewport.goHome();
+      // Restaurer la vue par défaut si elle existe, sinon goHome
+      const defaultView = Store.getJSON('eic_default_view', null);
+      if (defaultView) {
+        mainViewer.viewport.panTo(new OpenSeadragon.Point(defaultView.x, defaultView.y), false);
+        mainViewer.viewport.zoomTo(defaultView.zoom, null, false);
+      } else {
+        mainViewer.viewport.goHome();
+      }
+    });
+
+    // Clic droit sur Fit → sauvegarder la vue actuelle comme vue par défaut
+    zoomFitBtn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      saveDefaultView();
+      zoomFitBtn.textContent = '✓';
+      zoomFitBtn.title = 'Vue par défaut sauvegardée';
+      setTimeout(() => { zoomFitBtn.textContent = '⟲'; zoomFitBtn.title = 'Vue par défaut (clic droit = sauvegarder)'; }, 1500);
     });
 
     // Mettre à jour le pourcentage à chaque changement de zoom
@@ -302,6 +320,13 @@ const Viewer = (() => {
     return saved[zoneId] || null;
   }
 
+  function saveDefaultView() {
+    if (!mainViewer) return;
+    const center = mainViewer.viewport.getCenter();
+    const zoom = mainViewer.viewport.getZoom();
+    Store.set('eic_default_view', { x: center.x, y: center.y, zoom: zoom });
+  }
+
   return {
     init,
     panTo,
@@ -312,5 +337,6 @@ const Viewer = (() => {
     getZoomViewer,
     getCurrentZone,
     saveCurrentViewForZone,
+    saveDefaultView,
   };
 })();
