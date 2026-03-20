@@ -140,6 +140,41 @@ const Calibrate = (() => {
     document.getElementById('calibrate-id').focus();
   }
 
+  /**
+   * Chercher un élément dont la shape sauvegardée chevauche significativement les bounds données
+   * Utilisé en mode forme pour éviter d'écraser un élément voisin
+   */
+  function findOverlappingElement(newBounds) {
+    if (!newBounds) return null;
+    const allElements = Data.searchElementFuzzy('');
+    let bestMatch = null;
+    let bestOverlap = 0;
+
+    for (const el of allElements) {
+      if (!el.shape || !el.shape.bounds) continue;
+      const b = el.shape.bounds;
+
+      // Calculer l'intersection des deux rectangles
+      const overlapX = Math.max(0, Math.min(b.x + b.w, newBounds.x + newBounds.w) - Math.max(b.x, newBounds.x));
+      const overlapY = Math.max(0, Math.min(b.y + b.h, newBounds.y + newBounds.h) - Math.max(b.y, newBounds.y));
+      const overlapArea = overlapX * overlapY;
+
+      if (overlapArea <= 0) continue;
+
+      // L'overlap doit couvrir au moins 30% de l'un des deux rectangles
+      const existingArea = b.w * b.h;
+      const newArea = newBounds.w * newBounds.h;
+      const overlapRatio = Math.max(overlapArea / existingArea, overlapArea / newArea);
+
+      if (overlapRatio > 0.3 && overlapArea > bestOverlap) {
+        bestOverlap = overlapArea;
+        bestMatch = el;
+      }
+    }
+
+    return bestMatch;
+  }
+
   function findNearbyElement(x, y) {
     const threshold = 0.005; // ~0.5% du schéma
     let closest = null;
@@ -533,8 +568,9 @@ const Calibrate = (() => {
 
     cancelShapeDrawing();
 
-    // Chercher un élément existant dans la zone
-    const nearby = findNearbyElement(vpCenter.x, vpCenter.y);
+    // En mode forme, chercher uniquement un élément dont la shape chevauche la nouvelle
+    // (ne PAS utiliser la proximité au centre, sinon on risque d'écraser un voisin)
+    const nearby = findOverlappingElement(pendingShape.bounds);
 
     // Ouvrir le popup
     openCalibrationPopup(nearby);
