@@ -969,17 +969,28 @@ const Settings = (() => {
       if (gareName) {
         const q = normalize(gareName);
         let found = null;
-        // Chercher d'abord une correspondance exacte dans toutes les dessertes
+        // 1. Correspondance exacte
         Data.getAllDessertes().forEach((d, id) => {
           if (!found && normalize(d.nom) === q) found = id;
         });
-        // Sinon chercher une correspondance partielle
+        // 2. Le nom de desserte est contenu dans la saisie
+        if (!found) {
+          let bestLen = 0;
+          Data.getAllDessertes().forEach((d, id) => {
+            const n = normalize(d.nom);
+            if (q.includes(n) && n.length > bestLen) {
+              bestLen = n.length;
+              found = id;
+            }
+          });
+        }
+        // 3. La saisie est contenue dans un nom de desserte
         if (!found) {
           Data.getAllDessertes().forEach((d, id) => {
             if (!found && normalize(d.nom).includes(q)) found = id;
           });
         }
-        // Fallback sur les gares PDF
+        // 4. Fallback gares PDF
         if (!found) {
           const matches = Data.searchGare(gareName);
           if (matches.length > 0) found = matches[0].id;

@@ -285,32 +285,57 @@ const Calibrate = (() => {
     const pk = document.getElementById('calibrate-pk').value.trim();
     const secteur = document.getElementById('calibrate-secteur').value.trim();
 
+    // Récupérer l'ancienne gare_id (pour ne pas la perdre si le nom ne matche pas)
+    const editId = popup.dataset.editId;
+    let previousGareId = null;
+    if (editId) {
+      const existing = Data.searchElementFuzzy('').find(e => e.id === editId);
+      if (existing) previousGareId = existing.gare_id;
+    }
+
     // Trouver la desserte par nom (toutes les dessertes, pas juste les gares PDF)
     let gareId = null;
     if (gareName) {
-      const q = gareName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
+      const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
+      const q = norm(gareName);
+
+      // 1. Correspondance exacte
       Data.getAllDessertes().forEach((d, id) => {
-        if (!gareId) {
-          const n = (d.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
-          if (n === q) gareId = id;
-        }
+        if (!gareId && norm(d.nom) === q) gareId = id;
       });
+
+      // 2. Le nom de desserte est contenu dans la saisie (ex: "Paris-Nord" dans "Paris-Nord Grandes Lignes")
       if (!gareId) {
+        let bestLen = 0;
         Data.getAllDessertes().forEach((d, id) => {
-          if (!gareId) {
-            const n = (d.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-'']/g, ' ').trim();
-            if (n.includes(q)) gareId = id;
+          const n = norm(d.nom);
+          if (q.includes(n) && n.length > bestLen) {
+            bestLen = n.length;
+            gareId = id;
           }
         });
       }
-      // Fallback gares PDF
+
+      // 3. La saisie est contenue dans un nom de desserte
+      if (!gareId) {
+        Data.getAllDessertes().forEach((d, id) => {
+          if (!gareId && norm(d.nom).includes(q)) gareId = id;
+        });
+      }
+
+      // 4. Fallback gares PDF
       if (!gareId) {
         const matches = Data.searchGare(gareName);
         if (matches.length > 0) gareId = matches[0].id;
       }
+
+      // Si toujours rien trouvé, garder l'ancienne valeur
+      if (!gareId) {
+        console.warn('Desserte non trouvée pour "' + gareName + '", conservation de l\'ancienne valeur');
+        gareId = previousGareId;
+      }
     }
 
-    const editId = popup.dataset.editId;
     const id = editId || Data.generateId();
 
     const element = {
