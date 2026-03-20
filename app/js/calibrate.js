@@ -336,6 +336,22 @@ const Calibrate = (() => {
       }
     }
 
+    // DEBUG — tracer la résolution de desserte
+    console.log('=== SAVE ELEMENT DEBUG ===');
+    console.log('gareName saisie:', JSON.stringify(gareName));
+    console.log('gareId résolu:', gareId);
+    console.log('previousGareId:', previousGareId);
+    if (gareName) {
+      const norm2 = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
+      console.log('gareName normalisé:', JSON.stringify(norm2(gareName)));
+      const dessertes = Data.getAllDessertes();
+      console.log('Nb dessertes:', dessertes.size);
+      dessertes.forEach((d, id) => {
+        if (norm2(d.nom).includes('paris')) console.log('  -', id, '→', d.nom, '→ norm:', JSON.stringify(norm2(d.nom)));
+      });
+    }
+    console.log('=========================');
+
     const id = editId || Data.generateId();
 
     const element = {
