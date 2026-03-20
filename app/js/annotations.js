@@ -1722,7 +1722,15 @@ const Annotations = (() => {
         const icon = document.createElement('span');
         icon.className = 'legend-item-icon';
         icon.style.color = a.color;
-        icon.textContent = a.symbol || getAnnotationIcon(a);
+        if (a.type === 'image' && a.src) {
+          const img = document.createElement('img');
+          img.src = a.src;
+          img.style.cssText = 'height:14px;width:auto;vertical-align:middle;';
+          icon.textContent = '';
+          icon.appendChild(img);
+        } else {
+          icon.textContent = a.symbol || getAnnotationIcon(a);
+        }
 
         // Pastille numéro
         const numBadge = document.createElement('span');
