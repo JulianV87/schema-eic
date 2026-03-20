@@ -164,6 +164,10 @@ const Annotations = (() => {
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
       }
+      // Machine de secours (image)
+      else if (activeTool === 'machine-secours') {
+        addImageAnnotation(viewportPoint.x, viewportPoint.y, '/app/img/machine-secours.png', 'Machine secours');
+      }
       // Texte libre
       else if (activeTool === 'text') {
         const text = prompt('Texte :');
@@ -364,6 +368,28 @@ const Annotations = (() => {
       y: y,
       text: text,
       color: '#ffffff',
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  /**
+   * Ajouter une annotation image (ex: machine de secours)
+   */
+  function addImageAnnotation(x, y, src, label) {
+    const num = getNextNumber('image');
+    const annotation = {
+      id: nextId++,
+      type: 'image',
+      x: x,
+      y: y,
+      src: src,
+      label: label || '',
+      color: '#00a550',
+      number: num,
     };
     pushUndo();
     annotations.push(annotation);
@@ -807,6 +833,7 @@ const Annotations = (() => {
       case 'marker': return `${a.label || 'Marqueur'}${num}`;
       case 'line': return a.label || 'Ligne';
       case 'freedraw': return 'Dessin libre';
+      case 'image': return `${a.label || 'Image'}${num}`;
       default: return 'Annotation';
     }
   }
@@ -819,6 +846,7 @@ const Annotations = (() => {
       case 'marker': return a.symbol || '●';
       case 'line': return '━';
       case 'freedraw': return '✏';
+      case 'image': return '🚂';
       default: return '●';
     }
   }
@@ -978,6 +1006,9 @@ const Annotations = (() => {
           break;
         case 'freedraw':
           drawFreeDraw(ctx, a);
+          break;
+        case 'image':
+          drawImageAnnotation(ctx, screen, a);
           break;
       }
     });
@@ -1182,6 +1213,66 @@ const Annotations = (() => {
       ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
+    ctx.restore();
+  }
+
+  // Cache des images chargées
+  const imageCache = {};
+
+  function drawImageAnnotation(ctx, pos, annotation) {
+    const imgW = 60;  // largeur en pixels écran
+    const imgH = 24;  // hauteur proportionnelle
+    const x = pos.x - imgW / 2;
+    const y = pos.y - imgH / 2;
+
+    // Charger l'image (mise en cache)
+    if (!imageCache[annotation.src]) {
+      const img = new Image();
+      img.src = annotation.src;
+      img.onload = () => {
+        imageCache[annotation.src] = img;
+        redraw(); // Redessin une fois l'image chargée
+      };
+      imageCache[annotation.src] = 'loading';
+      // Placeholder en attendant
+      ctx.save();
+      ctx.fillStyle = annotation.color;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(x, y, imgW, imgH);
+      ctx.restore();
+      return;
+    }
+
+    if (imageCache[annotation.src] === 'loading') return;
+
+    const img = imageCache[annotation.src];
+
+    ctx.save();
+    ctx.drawImage(img, x, y, imgW, imgH);
+
+    // Numéro en cercle (légende)
+    if (annotation.number != null) {
+      ctx.beginPath();
+      ctx.arc(x + imgW + 8, y + imgH / 2, 8, 0, Math.PI * 2);
+      ctx.fillStyle = annotation.color;
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(annotation.number), x + imgW + 8, y + imgH / 2 + 3);
+    }
+
+    // Label en dessous
+    if (annotation.label) {
+      ctx.font = '9px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(annotation.label, pos.x, y + imgH + 12);
+      ctx.shadowBlur = 0;
+    }
+
     ctx.restore();
   }
 
