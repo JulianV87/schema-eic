@@ -1509,35 +1509,41 @@ const Search = (() => {
       }
     });
 
-    // Chercher dans les PN
-    const pnResults = [];
+    // Chercher dans les éléments infra (PN, signaux, aiguilles, etc.)
+    const elementResults = [];
     const seenPos = new Set();
-    const gares = Data.getGares();
+    const allDesserteMap = Data.getAllDessertes();
     Data.searchElementFuzzy('').forEach(el => {
-      if (el.type !== 'pn') return;
       const posKey = Math.round(el.x_pct * 300) + ',' + Math.round(el.y_pct * 300);
       if (seenPos.has(posKey)) return;
       seenPos.add(posKey);
-      // Chercher par numéro exact d'abord, puis par contenu
-      const qNum = q.replace(/\s+/g, '').match(/^pn(\d+)/i);
-      const elNum = el.identifiant.match(/^PN\s*(\d+(?:\.\d+)?)/i);
+
       let match = false;
-      if (qNum && elNum) {
-        // Match exact sur le numéro : "pn4" ne doit pas matcher "pn47"
-        match = elNum[1] === qNum[1] || elNum[1].startsWith(qNum[1] + '.');
+      if (el.type === 'pn') {
+        // PN : match exact sur le numéro
+        const qNum = q.replace(/\s+/g, '').match(/^pn(\d+)/i);
+        const elNum = el.identifiant.match(/^PN\s*(\d+(?:\.\d+)?)/i);
+        if (qNum && elNum) {
+          match = elNum[1] === qNum[1] || elNum[1].startsWith(qNum[1] + '.');
+        } else {
+          match = normalize(el.identifiant).includes(q) || (el.pn_type && normalize(el.pn_type).includes(q));
+        }
       } else {
-        // Match générique (type, texte libre)
-        match = normalize(el.identifiant).includes(q) || (el.pn_type && normalize(el.pn_type).includes(q));
+        // Signaux, aiguilles, etc. : match sur identifiant, secteur, ligne
+        match = normalize(el.identifiant).includes(q) ||
+          (el.secteur && normalize(el.secteur).includes(q)) ||
+          (el.ligne && normalize(el.ligne).includes(q));
       }
+
       if (match) {
-        // Trouver la desserte associée
-        const gare = el.gare_id ? gares.find(g => g.id === el.gare_id) : null;
+        // Trouver la desserte associée (dessertes d'abord, puis gares PDF)
+        const gare = el.gare_id ? (allDesserteMap.get(el.gare_id) || Data.getGare(el.gare_id) || null) : null;
         const label = el.identifiant + (gare ? ' — ' + gare.nom : '');
-        pnResults.push({ type: 'pn', id: el.id, nom: label, data: el });
+        elementResults.push({ type: el.type, id: el.id, nom: label, data: el });
       }
     });
 
-    const results = [...desserteResults.slice(0, 8), ...pnResults.slice(0, 8)];
+    const results = [...desserteResults.slice(0, 8), ...elementResults.slice(0, 12)];
     if (results.length === 0) { closeSuggestions(); return; }
 
     // Créer ou réutiliser le dropdown
@@ -1560,6 +1566,12 @@ const Search = (() => {
       if (r.type === 'desserte') {
         icon.textContent = '◈';
         icon.style.color = 'var(--accent2)';
+      } else if (r.type === 'signal') {
+        icon.textContent = '●';
+        icon.style.color = '#00d4a0';
+      } else if (r.type === 'aiguille') {
+        icon.textContent = '⬦';
+        icon.style.color = '#ff6b6b';
       } else {
         icon.textContent = '⬥';
         icon.style.color = 'var(--warn)';
