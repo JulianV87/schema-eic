@@ -28,6 +28,7 @@ const Viewer = (() => {
       maxZoomPixelRatio: 10,
       visibilityRatio: 0.5,
       constrainDuringPan: false,
+      homeFillsViewer: true,
       showZoomControl: false,
       showHomeControl: false,
       showFullPageControl: false,
@@ -108,9 +109,12 @@ const Viewer = (() => {
 
     let homeZoom = null;
 
-    // Stocker le zoom initial comme référence 100%
+    // Stocker le zoom initial comme référence 100% et centrer le schéma
     mainViewer.addHandler('open', () => {
       homeZoom = mainViewer.viewport.getHomeZoom();
+      // Centrer le schéma horizontalement (par défaut OSD l'aligne à gauche)
+      const bounds = mainViewer.viewport.getHomeBounds();
+      mainViewer.viewport.fitBounds(bounds, true);
       updateZoomLevel();
     });
 
