@@ -91,7 +91,7 @@ const Annotations = (() => {
    * Calculer le prochain numéro pour un type de tool donné
    */
   function getNextNumber(tool) {
-    const existing = annotations.filter(a => a.tool === tool);
+    const existing = annotations.filter(a => a.tool === tool || a.type === tool);
     if (existing.length === 0) return 1;
     return Math.max(...existing.map(a => a.number || 0)) + 1;
   }
@@ -160,10 +160,12 @@ const Annotations = (() => {
         return;
       }
 
-      // Désélectionner si on clique ailleurs
+      // Désélectionner si on clique ailleurs — et ne PAS placer une nouvelle annotation
       if (selectedAnnot) {
         selectedAnnot = null;
+        event.preventDefaultAction = true;
         redraw();
+        return;
       }
 
       event.preventDefaultAction = true;
