@@ -28,6 +28,8 @@ const Viewer = (() => {
       maxZoomPixelRatio: 10,
       visibilityRatio: 0.5,
       constrainDuringPan: false,
+      defaultZoomLevel: 0,
+      homeFillsViewer: false,
       showZoomControl: false,
       showHomeControl: false,
       showFullPageControl: false,
