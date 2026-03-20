@@ -111,11 +111,13 @@ const Viewer = (() => {
     // Stocker le zoom initial comme référence 100% et restaurer la vue par défaut
     mainViewer.addHandler('open', () => {
       homeZoom = mainViewer.viewport.getHomeZoom();
-      // Restaurer la vue par défaut sauvegardée
+      // Restaurer la vue par défaut sauvegardée (après que les tuiles soient prêtes)
       const defaultView = Store.getJSON('eic_default_view', null);
       if (defaultView) {
-        mainViewer.viewport.panTo(new OpenSeadragon.Point(defaultView.x, defaultView.y), true);
-        mainViewer.viewport.zoomTo(defaultView.zoom, null, true);
+        setTimeout(() => {
+          mainViewer.viewport.panTo(new OpenSeadragon.Point(defaultView.x, defaultView.y), false);
+          mainViewer.viewport.zoomTo(defaultView.zoom, null, false);
+        }, 300);
       }
       updateZoomLevel();
     });
