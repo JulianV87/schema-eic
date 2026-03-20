@@ -7,6 +7,14 @@ const Annotations = (() => {
   let activeTool = null;
   let nextId = 1;
 
+  // Sélection / déplacement / redimensionnement d'annotations image
+  let selectedAnnot = null;   // annotation sélectionnée
+  let isDraggingAnnot = false;
+  let dragAnnotOffset = null; // { dx, dy } offset du clic par rapport au centre
+  let isResizingAnnot = false;
+  let resizeAnnotHandle = null; // 'se','sw','ne','nw'
+  let resizeAnnotOrigin = null;
+
   // Undo/Redo stacks
   let undoStack = [];
   let redoStack = [];
@@ -137,9 +145,28 @@ const Annotations = (() => {
       if (!activeTool) return;
       if (activeTool === 'magicwand') return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
-      event.preventDefaultAction = true;
 
       const viewportPoint = viewer.viewport.pointFromPixel(event.position);
+
+      // Si on vient de finir un drag/resize, ne pas traiter le clic
+      if (isDraggingAnnot || isResizingAnnot) return;
+
+      // Vérifier si on clique sur une annotation image existante
+      const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y);
+      if (hitAnnot) {
+        event.preventDefaultAction = true;
+        selectedAnnot = hitAnnot;
+        redraw();
+        return;
+      }
+
+      // Désélectionner si on clique ailleurs
+      if (selectedAnnot) {
+        selectedAnnot = null;
+        redraw();
+      }
+
+      event.preventDefaultAction = true;
 
       // Outils train
       if (TRAIN_SYMBOLS[activeTool]) {
@@ -235,6 +262,82 @@ const Annotations = (() => {
       }
       drawPoints = [];
       redraw();
+    });
+
+    // Déplacement / redimensionnement d'annotations image
+    viewer.addHandler('canvas-press', (event) => {
+      if (!selectedAnnot) return;
+      if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
+
+      const vp = viewer.viewport.pointFromPixel(event.position);
+      const imgW = (selectedAnnot.imgW || 60);
+      const imgH = (selectedAnnot.imgH || 24);
+      // Convertir taille pixels en viewport approximatif
+      const vpSize = getAnnotViewportSize(selectedAnnot);
+
+      // Tester les poignées de redimensionnement
+      const handle = hitTestAnnotHandle(vp.x, vp.y, selectedAnnot, vpSize);
+      if (handle) {
+        event.preventDefaultAction = true;
+        isResizingAnnot = true;
+        resizeAnnotHandle = handle;
+        resizeAnnotOrigin = { x: vp.x, y: vp.y, w: selectedAnnot.imgW || 60, h: selectedAnnot.imgH || 24 };
+        return;
+      }
+
+      // Tester si on est sur l'annotation → déplacer
+      if (isPointInAnnot(vp.x, vp.y, selectedAnnot, vpSize)) {
+        event.preventDefaultAction = true;
+        isDraggingAnnot = true;
+        dragAnnotOffset = { dx: selectedAnnot.x - vp.x, dy: selectedAnnot.y - vp.y };
+        pushUndo();
+      }
+    });
+
+    viewer.addHandler('canvas-drag', (event) => {
+      if (!isDraggingAnnot && !isResizingAnnot) return;
+      event.preventDefaultAction = true;
+
+      const vp = viewer.viewport.pointFromPixel(event.position);
+
+      if (isDraggingAnnot && selectedAnnot) {
+        selectedAnnot.x = vp.x + dragAnnotOffset.dx;
+        selectedAnnot.y = vp.y + dragAnnotOffset.dy;
+        redraw();
+      } else if (isResizingAnnot && selectedAnnot && resizeAnnotOrigin) {
+        const dx = vp.x - resizeAnnotOrigin.x;
+        const dy = vp.y - resizeAnnotOrigin.y;
+        // Calculer le facteur de scale en pixels
+        const viewer = Viewer.getMainViewer();
+        const p1 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(0, 0));
+        const p2 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(dx, dy));
+        const pxDx = p2.x - p1.x;
+        const pxDy = p2.y - p1.y;
+
+        let newW = resizeAnnotOrigin.w;
+        let newH = resizeAnnotOrigin.h;
+
+        if (resizeAnnotHandle.includes('e')) newW = Math.max(20, resizeAnnotOrigin.w + pxDx);
+        if (resizeAnnotHandle.includes('w')) newW = Math.max(20, resizeAnnotOrigin.w - pxDx);
+        if (resizeAnnotHandle.includes('s')) newH = Math.max(10, resizeAnnotOrigin.h + pxDy);
+        if (resizeAnnotHandle.includes('n')) newH = Math.max(10, resizeAnnotOrigin.h - pxDy);
+
+        selectedAnnot.imgW = Math.round(newW);
+        selectedAnnot.imgH = Math.round(newH);
+        redraw();
+      }
+    });
+
+    viewer.addHandler('canvas-release', (event) => {
+      if (isDraggingAnnot || isResizingAnnot) {
+        isDraggingAnnot = false;
+        isResizingAnnot = false;
+        dragAnnotOffset = null;
+        resizeAnnotHandle = null;
+        resizeAnnotOrigin = null;
+        saveToLocalStorage();
+        redraw();
+      }
     });
 
     // Clic droit sur le viewer container → menu contextuel complet
@@ -1216,14 +1319,61 @@ const Annotations = (() => {
     ctx.restore();
   }
 
+  // === Interaction annotations image ===
+
+  function getAnnotViewportSize(a) {
+    // Convertir la taille pixel en viewport (approximatif)
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return { w: 0.01, h: 0.005 };
+    const w = a.imgW || 60;
+    const h = a.imgH || 24;
+    const c = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(a.x, a.y));
+    const c2 = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(c.x + w, c.y + h));
+    return { w: c2.x - a.x, h: c2.y - a.y };
+  }
+
+  function isPointInAnnot(px, py, a, vpSize) {
+    const hw = vpSize.w / 2;
+    const hh = vpSize.h / 2;
+    return px >= a.x - hw && px <= a.x + hw && py >= a.y - hh && py <= a.y + hh;
+  }
+
+  function hitTestImageAnnotation(px, py) {
+    // Parcourir en ordre inverse (dernier placé = au-dessus)
+    for (let i = annotations.length - 1; i >= 0; i--) {
+      const a = annotations[i];
+      if (a.type !== 'image') continue;
+      const vpSize = getAnnotViewportSize(a);
+      if (isPointInAnnot(px, py, a, vpSize)) return a;
+    }
+    return null;
+  }
+
+  function hitTestAnnotHandle(px, py, a, vpSize) {
+    const hw = vpSize.w / 2;
+    const hh = vpSize.h / 2;
+    const tol = vpSize.w * 0.15; // tolérance proportionnelle
+    const corners = {
+      nw: { x: a.x - hw, y: a.y - hh },
+      ne: { x: a.x + hw, y: a.y - hh },
+      sw: { x: a.x - hw, y: a.y + hh },
+      se: { x: a.x + hw, y: a.y + hh },
+    };
+    for (const [name, pos] of Object.entries(corners)) {
+      if (Math.abs(px - pos.x) < tol && Math.abs(py - pos.y) < tol) return name;
+    }
+    return null;
+  }
+
   // Cache des images chargées
   const imageCache = {};
 
   function drawImageAnnotation(ctx, pos, annotation) {
-    const imgW = 60;  // largeur en pixels écran
-    const imgH = 24;  // hauteur proportionnelle
+    const imgW = annotation.imgW || 60;
+    const imgH = annotation.imgH || 24;
     const x = pos.x - imgW / 2;
     const y = pos.y - imgH / 2;
+    const isSel = selectedAnnot && selectedAnnot.id === annotation.id;
 
     // Charger l'image (mise en cache)
     if (!imageCache[annotation.src]) {
@@ -1231,10 +1381,9 @@ const Annotations = (() => {
       img.src = annotation.src;
       img.onload = () => {
         imageCache[annotation.src] = img;
-        redraw(); // Redessin une fois l'image chargée
+        redraw();
       };
       imageCache[annotation.src] = 'loading';
-      // Placeholder en attendant
       ctx.save();
       ctx.fillStyle = annotation.color;
       ctx.globalAlpha = 0.5;
@@ -1249,6 +1398,29 @@ const Annotations = (() => {
 
     ctx.save();
     ctx.drawImage(img, x, y, imgW, imgH);
+
+    // Cadre de sélection + poignées
+    if (isSel) {
+      ctx.strokeStyle = '#ff9520';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x - 1, y - 1, imgW + 2, imgH + 2);
+      ctx.setLineDash([]);
+
+      // 4 poignées aux coins
+      const hs = 5;
+      const corners = [
+        [x, y], [x + imgW, y],
+        [x, y + imgH], [x + imgW, y + imgH],
+      ];
+      corners.forEach(([cx, cy]) => {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(cx - hs, cy - hs, hs * 2, hs * 2);
+        ctx.strokeStyle = '#ff9520';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx - hs, cy - hs, hs * 2, hs * 2);
+      });
+    }
 
     // Numéro en cercle (légende)
     if (annotation.number != null) {
