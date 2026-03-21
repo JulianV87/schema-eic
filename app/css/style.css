@@ -307,9 +307,9 @@ html, body {
   position: relative;
   pointer-events: auto;
   min-width: 500px;
-  max-width: 700px;
-  width: 50vw;
-  max-height: 75vh;
+  max-width: 900px;
+  width: 60vw;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   background: var(--surface);
