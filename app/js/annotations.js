@@ -112,10 +112,11 @@ const Annotations = (() => {
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
-      // Mode édition sticker : Enter valide, Escape annule
+      // Mode édition sticker
       if (editingSticker) {
         if (e.key === 'Enter') { e.preventDefault(); exitStickerEditMode(); }
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape') { e.preventDefault(); exitStickerEditMode(); }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
           const idx = annotations.indexOf(editingSticker);
           if (idx >= 0) annotations.splice(idx, 1);
@@ -136,7 +137,6 @@ const Annotations = (() => {
     const viewer = Viewer.getMainViewer();
 
     viewer.addHandler('canvas-click', (event) => {
-      if (!activeTool) return;
       if (activeTool === 'magicwand') return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
 
@@ -145,22 +145,33 @@ const Annotations = (() => {
       // Si on vient de finir un drag/resize, ne pas traiter le clic
       if (isDraggingAnnot || isResizingAnnot) return;
 
-      // Vérifier si on clique sur une annotation image existante
+      // Vérifier si on clique sur un sticker existant (même sans outil actif)
       const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y);
-      if (hitAnnot) {
+      if (hitAnnot && !editingSticker) {
         event.preventDefaultAction = true;
-        selectedAnnot = hitAnnot;
+        enterStickerEditMode(hitAnnot);
         redraw();
         return;
       }
 
-      // Désélectionner si on clique ailleurs — et ne PAS placer une nouvelle annotation
-      if (selectedAnnot) {
-        selectedAnnot = null;
+      // Si en mode édition et clic ailleurs que sur le sticker → déplacer le sticker
+      if (editingSticker && activeTool === 'image-library') {
         event.preventDefaultAction = true;
+        editingSticker.x = viewportPoint.x;
+        editingSticker.y = viewportPoint.y;
         redraw();
+        saveToLocalStorage();
         return;
       }
+
+      // Désélectionner si on clique ailleurs sans outil
+      if (selectedAnnot && !activeTool) {
+        exitStickerEditMode();
+        event.preventDefaultAction = true;
+        return;
+      }
+
+      if (!activeTool) return;
 
       event.preventDefaultAction = true;
 
@@ -187,18 +198,9 @@ const Annotations = (() => {
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
       }
-      // Image depuis la bibliothèque
-      else if (activeTool === 'image-library' && pendingImageSrc) {
-        if (editingSticker) {
-          // En mode édition : déplacer le sticker existant
-          editingSticker.x = viewportPoint.x;
-          editingSticker.y = viewportPoint.y;
-          redraw();
-          saveToLocalStorage();
-        } else {
-          addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
-          // Ne pas rester en mode placement — on est en mode édition maintenant
-        }
+      // Image depuis la bibliothèque (placement d'un nouveau sticker)
+      else if (activeTool === 'image-library' && pendingImageSrc && !editingSticker) {
+        addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
       }
       // Texte libre
       else if (activeTool === 'text') {
@@ -267,29 +269,33 @@ const Annotations = (() => {
       redraw();
     });
 
-    // Déplacement / redimensionnement d'annotations image
+    // Déplacement / redimensionnement de stickers
     viewer.addHandler('canvas-press', (event) => {
-      if (!selectedAnnot) return;
+      if (!selectedAnnot && !editingSticker) return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
+      const target = editingSticker || selectedAnnot;
+      if (!target || target.type !== 'image') return;
 
       const vp = viewer.viewport.pointFromPixel(event.position);
-      const vpSize = getAnnotViewportSize(selectedAnnot);
+      const vpSize = getAnnotViewportSize(target);
 
       // Tester les poignées de redimensionnement
-      const handle = hitTestAnnotHandle(vp.x, vp.y, selectedAnnot, vpSize);
+      const handle = hitTestAnnotHandle(vp.x, vp.y, target, vpSize);
       if (handle) {
         event.preventDefaultAction = true;
         isResizingAnnot = true;
+        selectedAnnot = target;
         resizeAnnotHandle = handle;
-        resizeAnnotOrigin = { x: vp.x, y: vp.y, vpW: selectedAnnot.vpW || STICKER_VP_WIDTH, vpH: selectedAnnot.vpH || STICKER_VP_HEIGHT };
+        resizeAnnotOrigin = { x: vp.x, y: vp.y, vpW: target.vpW || STICKER_VP_WIDTH, vpH: target.vpH || STICKER_VP_HEIGHT };
         return;
       }
 
       // Tester si on est sur l'annotation → déplacer
-      if (isPointInAnnot(vp.x, vp.y, selectedAnnot, vpSize)) {
+      if (isPointInAnnot(vp.x, vp.y, target, vpSize)) {
         event.preventDefaultAction = true;
         isDraggingAnnot = true;
-        dragAnnotOffset = { dx: selectedAnnot.x - vp.x, dy: selectedAnnot.y - vp.y };
+        selectedAnnot = target;
+        dragAnnotOffset = { dx: target.x - vp.x, dy: target.y - vp.y };
         pushUndo();
       }
     });
@@ -581,29 +587,28 @@ const Annotations = (() => {
     sep.style.cssText = 'width:1px;height:20px;background:var(--border);';
     bar.appendChild(sep);
 
-    // Valider
-    const okBtn = document.createElement('button');
-    okBtn.style.cssText = 'padding:4px 14px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
-    okBtn.textContent = '✓ Valider';
-    okBtn.addEventListener('click', () => exitStickerEditMode());
-    bar.appendChild(okBtn);
-
-    // Annuler
-    const cancelBtn = document.createElement('button');
-    cancelBtn.style.cssText = 'padding:4px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
-    cancelBtn.textContent = '✕';
-    cancelBtn.addEventListener('click', () => {
-      // Supprimer le sticker
+    // Supprimer
+    const delBtn = document.createElement('button');
+    delBtn.style.cssText = 'padding:4px 10px;background:none;border:1px solid #ff4040;border-radius:3px;color:#ff4040;font-family:var(--mono);font-size:10px;cursor:pointer;';
+    delBtn.textContent = 'Supprimer';
+    delBtn.addEventListener('click', () => {
       const idx = annotations.indexOf(annotation);
       if (idx >= 0) annotations.splice(idx, 1);
       exitStickerEditMode();
     });
-    bar.appendChild(cancelBtn);
+    bar.appendChild(delBtn);
+
+    // Valider
+    const okBtn = document.createElement('button');
+    okBtn.style.cssText = 'padding:4px 14px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+    okBtn.textContent = '✓ OK';
+    okBtn.addEventListener('click', () => exitStickerEditMode());
+    bar.appendChild(okBtn);
 
     document.body.appendChild(bar);
     stickerEditBar = bar;
 
-    showStatusMessage('Déplacez le sticker, ajustez taille/rotation, puis Validez');
+    showStatusMessage('Drag pour déplacer, poignées pour redimensionner. Entrée = valider, Suppr = supprimer');
   }
 
   function exitStickerEditMode() {
