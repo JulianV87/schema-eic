@@ -625,14 +625,15 @@ const Annotations = (() => {
       { label: 'Voie libérée (2 pts)', icon: '━', color: '#00d4a0', tool: 'voie-libre' },
       { label: 'Caténaire (2 pts)', icon: '━', color: '#3080ff', tool: 'catenaire' },
       { label: 'Texte libre', icon: 'T', color: '#c8daf5', tool: 'text' },
-      { label: 'Image / Custom...', icon: '🖼', color: '#c8daf5', tool: 'open-manager' },
+      { label: 'Sticker...', icon: '🖼', color: '#c8daf5', tool: 'open-stickers' },
     ];
 
     addOptions.forEach(opt => {
       const item = createMenuItem(opt.icon, opt.label, opt.color, () => {
         closeContextMenu();
-        if (opt.tool === 'open-manager') {
-          showAnnotationManager();
+        if (opt.tool === 'open-stickers') {
+          // Ouvrir stickers : afficher liste des stickers pour sélection rapide
+          showStickerPicker(viewportPoint);
         } else if (TRAIN_SYMBOLS[opt.tool]) {
           promptTrainNumber((num) => {
             addTrainAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, num);
@@ -1485,25 +1486,21 @@ const Annotations = (() => {
   ];
 
   function setupAnnotationManager() {
-    loadImageLibrary();
-    loadCustomAnnotations();
     renderPinnedAnnotations();
-    const btn = document.getElementById('btn-manage-annotations');
-    if (btn) btn.addEventListener('click', showAnnotationManager);
   }
 
-  // === ANNOTATIONS ÉPINGLÉES DANS LA SIDEBAR ===
+  // === STICKERS ÉPINGLÉS DANS LA SIDEBAR ===
 
   function renderPinnedAnnotations() {
     const container = document.getElementById('pinned-annotations');
     if (!container) return;
     container.innerHTML = '';
 
-    const pinned = customAnnotations.filter(c => c.pinned);
+    const stickers = Store.getJSON('eic_stickers', []);
+    const pinned = stickers.filter(s => s.pinned);
     if (pinned.length === 0) return;
 
-    pinned.forEach((custom, _) => {
-      const globalIndex = customAnnotations.indexOf(custom);
+    pinned.forEach(sticker => {
       const btn = document.createElement('div');
       btn.className = 'custom-tool-btn';
       btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;';
@@ -1511,20 +1508,15 @@ const Annotations = (() => {
       btn.addEventListener('mouseleave', () => { if (!btn.classList.contains('active')) btn.style.background = 'none'; });
 
       const iconEl = document.createElement('span');
-      iconEl.style.cssText = 'font-size:14px;flex-shrink:0;width:20px;text-align:center;';
-      if (custom.imageDataUrl) {
-        iconEl.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:16px;max-width:24px;vertical-align:middle;">';
-      } else if (custom.imageSrc) {
-        iconEl.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:16px;max-width:24px;vertical-align:middle;">';
-      } else {
-        iconEl.textContent = custom.symbol;
-        iconEl.style.color = custom.color;
+      iconEl.style.cssText = 'flex-shrink:0;width:24px;height:20px;display:flex;align-items:center;justify-content:center;';
+      if (sticker.imageSrc) {
+        iconEl.innerHTML = '<img src="' + sticker.imageSrc + '" style="max-height:18px;max-width:24px;object-fit:contain;">';
       }
       btn.appendChild(iconEl);
 
       const labelEl = document.createElement('span');
       labelEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      labelEl.textContent = custom.name;
+      labelEl.textContent = sticker.name;
       btn.appendChild(labelEl);
 
       btn.addEventListener('click', () => {
@@ -1537,16 +1529,10 @@ const Annotations = (() => {
         } else {
           btn.classList.add('active');
           btn.style.background = 'var(--surface2)';
-          if (custom.imageDataUrl || custom.imageSrc) {
-            setActiveTool('image-library');
-            pendingImageSrc = custom.imageDataUrl || custom.imageSrc;
-            pendingImageLabel = custom.name;
-          } else if (custom.placement === 'line') {
-            setActiveTool('custom-' + globalIndex);
-          } else {
-            setActiveTool('custom-' + globalIndex);
-          }
-          showStatusMessage('Cliquez sur le schéma pour placer "' + custom.name + '"');
+          setActiveTool('image-library');
+          pendingImageSrc = sticker.imageSrc;
+          pendingImageLabel = sticker.name;
+          showStatusMessage('Cliquez sur le schéma pour placer "' + sticker.name + '"');
         }
       });
 
@@ -1554,9 +1540,9 @@ const Annotations = (() => {
     });
   }
 
-  // === PANNEAU DE GESTION ===
+  function showAnnotationManager() { /* géré par settings.js onglet Stickers */ }
 
-  function showAnnotationManager() {
+  if (false) { /* ancien code showAnnotationManager */
     const old = document.getElementById('annotation-manager-modal');
     if (old) old.remove();
 
@@ -2015,6 +2001,64 @@ const Annotations = (() => {
   // Image en attente de placement
   let pendingImageSrc = null;
   let pendingImageLabel = null;
+
+  function showStickerPicker(viewportPoint) {
+    const stickers = Store.getJSON('eic_stickers', []);
+    if (stickers.length === 0) {
+      alert('Aucun sticker créé. Allez dans Paramètres > Stickers.');
+      return;
+    }
+    // Créer un mini-menu avec les stickers
+    const old = document.getElementById('sticker-picker-menu');
+    if (old) old.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'sticker-picker-menu';
+    menu.style.cssText = 'position:fixed;z-index:350;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.6);max-height:300px;overflow-y:auto;min-width:180px;';
+
+    // Positionner
+    const viewer = document.getElementById('osd-viewer');
+    const rect = viewer.getBoundingClientRect();
+    menu.style.left = (rect.left + rect.width / 2 - 90) + 'px';
+    menu.style.top = (rect.top + 60) + 'px';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'padding:6px 10px;font-family:var(--mono);font-size:9px;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);';
+    title.textContent = 'Choisir un sticker';
+    menu.appendChild(title);
+
+    stickers.forEach(sticker => {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text);';
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--surface2)');
+      item.addEventListener('mouseleave', () => item.style.background = 'none');
+
+      if (sticker.imageSrc) {
+        const img = document.createElement('img');
+        img.src = sticker.imageSrc;
+        img.style.cssText = 'max-height:20px;max-width:28px;object-fit:contain;';
+        item.appendChild(img);
+      }
+      const label = document.createElement('span');
+      label.textContent = sticker.name;
+      item.appendChild(label);
+
+      item.addEventListener('click', () => {
+        menu.remove();
+        setActiveTool('image-library');
+        pendingImageSrc = sticker.imageSrc;
+        pendingImageLabel = sticker.name;
+        showStatusMessage('Cliquez sur le schéma pour placer "' + sticker.name + '"');
+      });
+      menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', closeHandler); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 50);
+  }
 
   // === LÉGENDE ===
   let legendVisible = false;

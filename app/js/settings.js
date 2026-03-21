@@ -96,7 +96,7 @@ const Settings = (() => {
     else if (activeTab === 'aiguilles') renderInfraTab(container, 'aiguille', 'Aiguille');
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
-    else if (activeTab === 'annotations') renderAnnotationsSettings(container);
+    else if (activeTab === 'stickers') renderStickersSettings(container);
 
     // Synchroniser la barre du bas
     try { Search.reloadLayout(); } catch {}
@@ -1539,18 +1539,40 @@ const Settings = (() => {
   }
 
   // =========================================
-  // ANNOTATIONS
+  // STICKERS
   // =========================================
 
-  function renderAnnotationsSettings(container) {
-    // Déléguer au système d'annotations — on crée le contenu inline
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'padding:0;';
+  const DEFAULT_CATEGORIES = [
+    { id: 'cat-wagons', nom: 'Wagons', children: [] },
+    { id: 'cat-trains', nom: 'Trains', children: [
+      { id: 'cat-trains-fret', nom: 'Trains Fret', children: [] },
+      { id: 'cat-trains-voyageurs', nom: 'Trains Voyageurs', children: [] },
+    ]},
+    { id: 'cat-machines', nom: 'Machines', children: [] },
+  ];
 
-    // Sous-onglets : Annotations / Bibliothèque d'images
+  function getStickerCategories() {
+    const saved = Store.getJSON('eic_sticker_categories', null);
+    if (saved) return saved;
+    // Initialiser avec les catégories par défaut
+    Store.set('eic_sticker_categories', DEFAULT_CATEGORIES);
+    return JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+  }
+  function saveStickerCategories(cats) { Store.set('eic_sticker_categories', cats); }
+
+  function getStickerLibrary() { return Store.getJSON('eic_image_library', []); }
+  function saveStickerLibrary(lib) { Store.set('eic_image_library', lib); }
+
+  function getStickers() { return Store.getJSON('eic_stickers', []); }
+  function saveStickers(list) { Store.set('eic_stickers', list); }
+
+  function renderStickersSettings(container) {
+    const wrapper = document.createElement('div');
+
+    // Sous-onglets
     const subTabs = document.createElement('div');
     subTabs.style.cssText = 'display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:6px;';
-    let activeSubTab = 'annots';
+    let activeSubTab = 'stickers';
 
     function createSubTab(id, label) {
       const btn = document.createElement('button');
@@ -1565,8 +1587,9 @@ const Settings = (() => {
       });
       return btn;
     }
-    subTabs.appendChild(createSubTab('annots', 'Annotations'));
-    subTabs.appendChild(createSubTab('images', 'Bibliothèque d\'images'));
+    subTabs.appendChild(createSubTab('stickers', 'Stickers'));
+    subTabs.appendChild(createSubTab('images', 'Bibliothèque'));
+    subTabs.appendChild(createSubTab('categories', 'Catégories'));
     wrapper.appendChild(subTabs);
 
     const subContent = document.createElement('div');
@@ -1575,84 +1598,91 @@ const Settings = (() => {
 
     function renderSubContent() {
       subContent.innerHTML = '';
-      if (activeSubTab === 'annots') renderAnnotsList();
-      else renderImagesList();
+      if (activeSubTab === 'stickers') renderStickersList();
+      else if (activeSubTab === 'images') renderImageLib();
+      else if (activeSubTab === 'categories') renderCategoriesTree();
     }
 
-    // === Sous-onglet Annotations ===
-    function renderAnnotsList() {
-      const customAnnotations = Store.getJSON('eic_custom_annotations', []);
+    // ========== STICKERS ==========
+    function renderStickersList() {
+      const stickers = getStickers();
+      const categories = getStickerCategories();
 
-      // Bouton créer
       const addBtn = document.createElement('button');
       addBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
-      addBtn.textContent = '+ Créer une annotation';
-      addBtn.addEventListener('click', () => {
-        // Ouvrir le gestionnaire complet (modale Annotations)
-        if (typeof Annotations !== 'undefined' && Annotations.showAnnotationManager) {
-          Annotations.showAnnotationManager();
-        }
-      });
+      addBtn.textContent = '+ Créer un sticker';
+      addBtn.addEventListener('click', () => showCreateStickerForm(subContent));
       subContent.appendChild(addBtn);
 
-      if (customAnnotations.length === 0) {
+      if (stickers.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
-        empty.textContent = 'Aucune annotation personnalisée';
+        empty.textContent = 'Aucun sticker créé';
         subContent.appendChild(empty);
         return;
       }
 
-      customAnnotations.forEach((custom, index) => {
+      // Grouper par catégorie
+      function findCatName(catId, cats) {
+        for (const c of cats) {
+          if (c.id === catId) return c.nom;
+          const sub = findCatName(catId, c.children || []);
+          if (sub) return sub;
+        }
+        return null;
+      }
+
+      stickers.forEach((sticker, index) => {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);';
         row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
         row.addEventListener('mouseleave', () => row.style.background = 'none');
 
-        // Icône
         const icon = document.createElement('span');
-        icon.style.cssText = 'font-size:14px;width:22px;text-align:center;flex-shrink:0;';
-        if (custom.imageDataUrl) icon.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:18px;max-width:26px;">';
-        else if (custom.imageSrc) icon.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:18px;max-width:26px;">';
-        else { icon.textContent = custom.symbol; icon.style.color = custom.color; }
+        icon.style.cssText = 'flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;';
+        if (sticker.imageSrc) {
+          icon.innerHTML = '<img src="' + sticker.imageSrc + '" style="max-height:24px;max-width:28px;object-fit:contain;">';
+        }
         row.appendChild(icon);
 
-        // Nom
         const name = document.createElement('span');
         name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        name.textContent = custom.name;
+        name.textContent = sticker.name;
         row.appendChild(name);
 
-        // Badge type
-        const badge = document.createElement('span');
-        badge.style.cssText = 'font-family:var(--mono);font-size:8px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
-        badge.textContent = custom.placement === 'image' ? 'image' : custom.placement === 'line' ? 'ligne' : 'point';
-        row.appendChild(badge);
+        const catName = findCatName(sticker.categoryId, categories);
+        if (catName) {
+          const badge = document.createElement('span');
+          badge.style.cssText = 'font-family:var(--mono);font-size:8px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
+          badge.textContent = catName;
+          row.appendChild(badge);
+        }
 
         // Épingler
         const pinBtn = document.createElement('button');
         pinBtn.className = 'zone-item-btn';
-        pinBtn.textContent = custom.pinned ? '📌' : '📍';
-        pinBtn.title = custom.pinned ? 'Désépingler' : 'Épingler dans la sidebar';
-        pinBtn.style.opacity = custom.pinned ? '1' : '0.4';
+        pinBtn.textContent = sticker.pinned ? '📌' : '📍';
+        pinBtn.style.opacity = sticker.pinned ? '1' : '0.4';
+        pinBtn.title = sticker.pinned ? 'Désépingler' : 'Épingler dans la sidebar';
         pinBtn.addEventListener('click', () => {
-          customAnnotations[index].pinned = !customAnnotations[index].pinned;
-          Store.set('eic_custom_annotations', customAnnotations);
+          const fresh = getStickers();
+          fresh[index].pinned = !fresh[index].pinned;
+          saveStickers(fresh);
           if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
-          renderAnnotsList();
+          renderStickersList();
         });
         row.appendChild(pinBtn);
 
-        // Supprimer
         const delBtn = document.createElement('button');
         delBtn.className = 'zone-item-btn delete';
         delBtn.textContent = '✕';
         delBtn.addEventListener('click', () => {
-          if (!confirm('Supprimer "' + custom.name + '" ?')) return;
-          customAnnotations.splice(index, 1);
-          Store.set('eic_custom_annotations', customAnnotations);
+          if (!confirm('Supprimer "' + sticker.name + '" ?')) return;
+          const fresh = getStickers();
+          fresh.splice(index, 1);
+          saveStickers(fresh);
           if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
-          renderAnnotsList();
+          renderStickersList();
         });
         row.appendChild(delBtn);
 
@@ -1660,18 +1690,122 @@ const Settings = (() => {
       });
     }
 
-    // === Sous-onglet Images ===
-    const SETTINGS_DEFAULT_IMAGES = [
-      '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
-      'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
-      'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
-    ];
+    // Formulaire création sticker
+    function showCreateStickerForm(container) {
+      container.innerHTML = '';
+      const form = document.createElement('div');
+      form.style.cssText = 'padding:8px 4px;';
 
-    function renderImagesList() {
-      subContent.innerHTML = '';
-      const imageLibrary = Store.getJSON('eic_image_library', []);
+      const library = getStickerLibrary();
+      const categories = getStickerCategories();
 
-      // Upload
+      // Nom
+      const nameLabel = document.createElement('div');
+      nameLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px;';
+      nameLabel.textContent = 'Nom du sticker';
+      form.appendChild(nameLabel);
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Ex: TGV Euroduplex';
+      nameInput.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;margin-bottom:10px;box-sizing:border-box;';
+      form.appendChild(nameInput);
+
+      // Image
+      const imgLabel = document.createElement('div');
+      imgLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:5px;';
+      imgLabel.textContent = 'Image (depuis la bibliothèque)';
+      form.appendChild(imgLabel);
+
+      let selectedImgSrc = null;
+      const imgGrid = document.createElement('div');
+      imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:10px;max-height:130px;overflow-y:auto;';
+
+      library.forEach(img => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;height:42px;';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.dataUrl;
+        imgEl.style.cssText = 'max-height:36px;max-width:100%;object-fit:contain;';
+        imgEl.title = img.name;
+        card.appendChild(imgEl);
+        card.addEventListener('click', () => {
+          selectedImgSrc = img.dataUrl;
+          imgGrid.querySelectorAll('div').forEach(d => d.style.borderColor = 'var(--border)');
+          card.style.borderColor = 'var(--accent2)';
+          if (!nameInput.value) nameInput.value = img.name;
+        });
+        imgGrid.appendChild(card);
+      });
+
+      if (library.length === 0) {
+        const noImg = document.createElement('div');
+        noImg.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:10px;color:var(--muted);padding:8px;text-align:center;';
+        noImg.textContent = 'Aucune image. Ajoutez-en dans l\'onglet Bibliothèque.';
+        imgGrid.appendChild(noImg);
+      }
+      form.appendChild(imgGrid);
+
+      // Catégorie
+      const catLabel = document.createElement('div');
+      catLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px;';
+      catLabel.textContent = 'Catégorie';
+      form.appendChild(catLabel);
+
+      const catSelect = document.createElement('select');
+      catSelect.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;margin-bottom:12px;';
+
+      function addCatOptions(cats, depth) {
+        cats.forEach(cat => {
+          const opt = document.createElement('option');
+          opt.value = cat.id;
+          opt.textContent = '  '.repeat(depth) + cat.nom;
+          catSelect.appendChild(opt);
+          if (cat.children && cat.children.length > 0) addCatOptions(cat.children, depth + 1);
+        });
+      }
+      addCatOptions(categories, 0);
+      form.appendChild(catSelect);
+
+      // Boutons
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:6px;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.style.cssText = 'flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      cancelBtn.textContent = 'Annuler';
+      cancelBtn.addEventListener('click', () => renderStickersList());
+      btnRow.appendChild(cancelBtn);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.style.cssText = 'flex:1;padding:6px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+      saveBtn.textContent = 'Créer';
+      saveBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        if (!selectedImgSrc) { alert('Sélectionnez une image'); return; }
+
+        const stickers = getStickers();
+        stickers.push({
+          id: 'sticker-' + Date.now(),
+          name: name,
+          imageSrc: selectedImgSrc,
+          categoryId: catSelect.value,
+          pinned: false,
+        });
+        saveStickers(stickers);
+        if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
+        renderStickersList();
+      });
+      btnRow.appendChild(saveBtn);
+      form.appendChild(btnRow);
+
+      container.appendChild(form);
+      nameInput.focus();
+    }
+
+    // ========== BIBLIOTHÈQUE D'IMAGES ==========
+    function renderImageLib() {
+      const library = getStickerLibrary();
+
       const uploadBtn = document.createElement('button');
       uploadBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
       uploadBtn.textContent = '+ Ajouter des images';
@@ -1679,7 +1813,7 @@ const Settings = (() => {
       fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.multiple = true; fileInput.style.display = 'none';
       uploadBtn.addEventListener('click', () => fileInput.click());
       fileInput.addEventListener('change', () => {
-        const lib = Store.getJSON('eic_image_library', []);
+        const lib = getStickerLibrary();
         let loaded = 0;
         const files = Array.from(fileInput.files);
         files.forEach(file => {
@@ -1688,8 +1822,8 @@ const Settings = (() => {
             lib.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: ev.target.result });
             loaded++;
             if (loaded === files.length) {
-              Store.set('eic_image_library', lib);
-              renderImagesList();
+              saveStickerLibrary(lib);
+              renderImageLib();
             }
           };
           reader.readAsDataURL(file);
@@ -1698,60 +1832,152 @@ const Settings = (() => {
       subContent.appendChild(uploadBtn);
       subContent.appendChild(fileInput);
 
-      // Grille
+      if (library.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
+        empty.textContent = 'Aucune image uploadée';
+        subContent.appendChild(empty);
+        return;
+      }
+
       const grid = document.createElement('div');
       grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
 
-      // Par défaut
-      const defLabel = document.createElement('div');
-      defLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;padding-top:2px;';
-      defLabel.textContent = 'Images par défaut';
-      grid.appendChild(defLabel);
-      SETTINGS_DEFAULT_IMAGES.forEach(f => {
-        const card = createSettingsImgCard('/img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '));
+      library.forEach((img, i) => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
+
+        const imgEl = document.createElement('img');
+        imgEl.src = img.dataUrl;
+        imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
+        card.appendChild(imgEl);
+
+        const label = document.createElement('span');
+        label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+        label.textContent = img.name;
+        card.appendChild(label);
+
+        const del = document.createElement('button');
+        del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:10px;cursor:pointer;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
+        del.textContent = '✕';
+        del.addEventListener('click', () => {
+          if (!confirm('Supprimer "' + img.name + '" ?')) return;
+          const fresh = getStickerLibrary();
+          fresh.splice(i, 1);
+          saveStickerLibrary(fresh);
+          renderImageLib();
+        });
+        card.appendChild(del);
+
         grid.appendChild(card);
       });
-
-      // Uploadées
-      if (imageLibrary.length > 0) {
-        const uplLabel = document.createElement('div');
-        uplLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;padding-top:6px;';
-        uplLabel.textContent = 'Images uploadées';
-        grid.appendChild(uplLabel);
-        imageLibrary.forEach((img, i) => {
-          const card = createSettingsImgCard(img.dataUrl, img.name);
-          // Bouton supprimer
-          const del = document.createElement('button');
-          del.style.cssText = 'position:absolute;top:1px;right:1px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:9px;cursor:pointer;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;';
-          del.textContent = '✕';
-          del.addEventListener('click', () => {
-            const freshLib = Store.getJSON('eic_image_library', []);
-            freshLib.splice(i, 1);
-            Store.set('eic_image_library', freshLib);
-            renderImagesList();
-          });
-          card.appendChild(del);
-          grid.appendChild(card);
-        });
-      }
       subContent.appendChild(grid);
     }
 
-    function createSettingsImgCard(src, name) {
-      const card = document.createElement('div');
-      card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
+    // ========== CATÉGORIES ==========
+    function renderCategoriesTree() {
+      const categories = getStickerCategories();
 
-      const img = document.createElement('img');
-      img.src = src;
-      img.style.cssText = 'max-height:40px;max-width:100%;object-fit:contain;';
-      card.appendChild(img);
+      const addBtn = document.createElement('button');
+      addBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
+      addBtn.textContent = '+ Créer une catégorie';
+      addBtn.addEventListener('click', () => {
+        const n = prompt('Nom de la nouvelle catégorie :');
+        if (!n || !n.trim()) return;
+        categories.push({ id: 'cat-' + Date.now(), nom: n.trim(), children: [] });
+        saveStickerCategories(categories);
+        renderCategoriesTree();
+      });
+      subContent.appendChild(addBtn);
 
-      const label = document.createElement('span');
-      label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
-      label.textContent = name;
-      card.appendChild(label);
+      function renderNode(cat, depth, parentArray) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 4px 4px ' + (depth * 16 + 4) + 'px;border-bottom:1px solid var(--border);';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = 'none');
 
-      return card;
+        // Icône arbre
+        if (depth > 0) {
+          const indent = document.createElement('span');
+          indent.style.cssText = 'color:var(--border);font-size:10px;';
+          indent.textContent = '└';
+          row.appendChild(indent);
+        }
+
+        const name = document.createElement('span');
+        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.textContent = cat.nom;
+        row.appendChild(name);
+
+        // Nombre de stickers dans cette catégorie
+        const stickers = getStickers();
+        const count = stickers.filter(s => s.categoryId === cat.id).length;
+        if (count > 0) {
+          const badge = document.createElement('span');
+          badge.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);';
+          badge.textContent = count + ' sticker' + (count > 1 ? 's' : '');
+          row.appendChild(badge);
+        }
+
+        // Ajouter sous-catégorie
+        const addSubBtn = document.createElement('button');
+        addSubBtn.className = 'zone-item-btn';
+        addSubBtn.textContent = '+';
+        addSubBtn.title = 'Ajouter une sous-catégorie';
+        addSubBtn.addEventListener('click', () => {
+          const n = prompt('Nom de la sous-catégorie dans "' + cat.nom + '" :');
+          if (!n || !n.trim()) return;
+          if (!cat.children) cat.children = [];
+          cat.children.push({ id: 'cat-' + Date.now(), nom: n.trim(), children: [] });
+          saveStickerCategories(getStickerCategories().map(c => updateCatInTree(c, cat.id, cat)));
+          // Relire et re-render
+          const fresh = getStickerCategories();
+          subContent.innerHTML = '';
+          renderCategoriesTree();
+        });
+        row.appendChild(addSubBtn);
+
+        // Renommer
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'zone-item-btn';
+        renameBtn.textContent = '✎';
+        renameBtn.addEventListener('click', () => {
+          const n = prompt('Nom :', cat.nom);
+          if (!n || !n.trim()) return;
+          cat.nom = n.trim();
+          saveStickerCategories(categories);
+          subContent.innerHTML = '';
+          renderCategoriesTree();
+        });
+        row.appendChild(renameBtn);
+
+        // Supprimer
+        const delBtn = document.createElement('button');
+        delBtn.className = 'zone-item-btn delete';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', () => {
+          if (!confirm('Supprimer "' + cat.nom + '" et ses sous-catégories ?')) return;
+          const idx = parentArray.indexOf(cat);
+          if (idx >= 0) parentArray.splice(idx, 1);
+          saveStickerCategories(categories);
+          subContent.innerHTML = '';
+          renderCategoriesTree();
+        });
+        row.appendChild(delBtn);
+
+        subContent.appendChild(row);
+
+        // Enfants
+        (cat.children || []).forEach(child => renderNode(child, depth + 1, cat.children));
+      }
+
+      categories.forEach(cat => renderNode(cat, 0, categories));
+    }
+
+    function updateCatInTree(node, targetId, updated) {
+      if (node.id === targetId) return { ...updated };
+      if (node.children) node.children = node.children.map(c => updateCatInTree(c, targetId, updated));
+      return node;
     }
 
     renderSubContent();
