@@ -1804,6 +1804,7 @@ const Settings = (() => {
 
     // ========== BIBLIOTHÈQUE D'IMAGES ==========
     function renderImageLib() {
+      subContent.innerHTML = '';
       const library = getStickerLibrary();
 
       const uploadBtn = document.createElement('button');
