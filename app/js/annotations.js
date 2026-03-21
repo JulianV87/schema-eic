@@ -1486,58 +1486,279 @@ const Annotations = (() => {
   ];
 
   function setupAnnotationManager() {
-    renderPinnedAnnotations();
+    renderStickerCategoriesMenu();
   }
 
-  // === STICKERS ÉPINGLÉS DANS LA SIDEBAR ===
+  // === MENU CATÉGORIES STICKERS DANS LA SIDEBAR ===
 
   function renderPinnedAnnotations() {
-    const container = document.getElementById('pinned-annotations');
+    renderStickerCategoriesMenu();
+  }
+
+  function renderStickerCategoriesMenu() {
+    const container = document.getElementById('sticker-categories-menu');
     if (!container) return;
     container.innerHTML = '';
 
-    const stickers = Store.getJSON('eic_stickers', []);
-    const pinned = stickers.filter(s => s.pinned);
-    if (pinned.length === 0) return;
+    const categories = Store.getJSON('eic_sticker_categories', []);
+    const library = Store.getJSON('eic_image_library', []);
+    if (categories.length === 0) return;
 
-    pinned.forEach(sticker => {
-      const btn = document.createElement('div');
-      btn.className = 'custom-tool-btn';
-      btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;';
-      btn.addEventListener('mouseenter', () => btn.style.background = 'var(--surface2)');
-      btn.addEventListener('mouseleave', () => { if (!btn.classList.contains('active')) btn.style.background = 'none'; });
-
-      const iconEl = document.createElement('span');
-      iconEl.style.cssText = 'flex-shrink:0;width:24px;height:20px;display:flex;align-items:center;justify-content:center;';
-      if (sticker.imageSrc) {
-        iconEl.innerHTML = '<img src="' + sticker.imageSrc + '" style="max-height:18px;max-width:24px;object-fit:contain;">';
-      }
-      btn.appendChild(iconEl);
-
-      const labelEl = document.createElement('span');
-      labelEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      labelEl.textContent = sticker.name;
-      btn.appendChild(labelEl);
-
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tool-btn, .custom-tool-btn').forEach(b => { b.classList.remove('active'); b.style.background = ''; });
-        const isActive = btn.classList.contains('active');
-        if (isActive) {
-          btn.classList.remove('active');
-          btn.style.background = '';
-          setActiveTool(null);
-        } else {
-          btn.classList.add('active');
-          btn.style.background = 'var(--surface2)';
-          setActiveTool('image-library');
-          pendingImageSrc = sticker.imageSrc;
-          pendingImageLabel = sticker.name;
-          showStatusMessage('Cliquez sur le schéma pour placer "' + sticker.name + '"');
-        }
-      });
-
-      container.appendChild(btn);
+    categories.forEach(cat => {
+      const item = createCategoryItem(cat, library, container);
+      container.appendChild(item);
     });
+  }
+
+  function createCategoryItem(cat, library, rootContainer) {
+    const hasChildren = (cat.children && cat.children.length > 0);
+    const hasImages = (cat.images && cat.images.length > 0);
+    const hasContent = hasChildren || hasImages;
+
+    const item = document.createElement('div');
+    item.style.cssText = 'position:relative;';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:var(--mono);font-size:10px;color:var(--text);';
+    row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+    row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    label.textContent = cat.nom;
+    row.appendChild(label);
+
+    if (hasContent) {
+      const arrow = document.createElement('span');
+      arrow.style.cssText = 'font-size:8px;color:var(--muted);flex-shrink:0;';
+      arrow.textContent = '▶';
+      row.appendChild(arrow);
+    }
+
+    item.appendChild(row);
+
+    // Flyout au survol
+    if (hasContent) {
+      let flyout = null;
+      let closeTimeout = null;
+
+      function openFlyout() {
+        if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+        if (flyout) return;
+
+        // Fermer les autres flyouts au même niveau
+        rootContainer.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
+
+        flyout = document.createElement('div');
+        flyout.className = 'sticker-flyout';
+        flyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:350;min-width:180px;max-height:320px;overflow-y:auto;padding:4px 0;';
+
+        // Positionner à droite de l'item
+        const rect = row.getBoundingClientRect();
+        flyout.style.left = (rect.right + 4) + 'px';
+        flyout.style.top = rect.top + 'px';
+
+        // Vérifier que ça ne sort pas de l'écran à droite
+        setTimeout(() => {
+          if (!flyout) return;
+          const fr = flyout.getBoundingClientRect();
+          if (fr.right > window.innerWidth - 10) {
+            flyout.style.left = (rect.left - fr.width - 4) + 'px';
+          }
+          if (fr.bottom > window.innerHeight - 10) {
+            flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
+          }
+        }, 0);
+
+        // Sous-catégories
+        if (hasChildren) {
+          cat.children.forEach(child => {
+            const subItem = createFlyoutCategoryItem(child, library, flyout);
+            flyout.appendChild(subItem);
+          });
+        }
+
+        // Séparateur si les deux
+        if (hasChildren && hasImages) {
+          const sep = document.createElement('div');
+          sep.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;';
+          flyout.appendChild(sep);
+        }
+
+        // Images
+        if (hasImages) {
+          const imgGrid = document.createElement('div');
+          imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 8px;';
+          cat.images.forEach(imgName => {
+            const img = library.find(i => i.name === imgName);
+            if (!img) return;
+            const card = document.createElement('div');
+            card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+            card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
+            card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+
+            const imgEl = document.createElement('img');
+            imgEl.src = img.dataUrl;
+            imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
+            card.appendChild(imgEl);
+
+            const name = document.createElement('span');
+            name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+            name.textContent = img.name;
+            card.appendChild(name);
+
+            card.addEventListener('click', () => {
+              closeFlyout();
+              setActiveTool('image-library');
+              pendingImageSrc = img.dataUrl;
+              pendingImageLabel = img.name;
+              document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+              showStatusMessage('Cliquez sur le schéma pour placer "' + img.name + '"');
+            });
+
+            imgGrid.appendChild(card);
+          });
+          flyout.appendChild(imgGrid);
+        }
+
+        flyout.addEventListener('mouseenter', () => {
+          if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+        });
+        flyout.addEventListener('mouseleave', () => {
+          closeTimeout = setTimeout(closeFlyout, 200);
+        });
+
+        document.body.appendChild(flyout);
+      }
+
+      function closeFlyout() {
+        if (flyout) { flyout.remove(); flyout = null; }
+        // Fermer les sous-flyouts aussi
+        document.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
+      }
+
+      row.addEventListener('mouseenter', openFlyout);
+      row.addEventListener('mouseleave', () => {
+        closeTimeout = setTimeout(closeFlyout, 200);
+      });
+    }
+
+    return item;
+  }
+
+  function createFlyoutCategoryItem(cat, library, parentFlyout) {
+    const hasChildren = (cat.children && cat.children.length > 0);
+    const hasImages = (cat.images && cat.images.length > 0);
+    const hasContent = hasChildren || hasImages;
+
+    const item = document.createElement('div');
+    item.style.cssText = 'position:relative;';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text);';
+    row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+    row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    label.textContent = cat.nom;
+    row.appendChild(label);
+
+    if (hasContent) {
+      const arrow = document.createElement('span');
+      arrow.style.cssText = 'font-size:8px;color:var(--muted);flex-shrink:0;';
+      arrow.textContent = '▶';
+      row.appendChild(arrow);
+    }
+
+    item.appendChild(row);
+
+    if (hasContent) {
+      let subFlyout = null;
+      let closeTimeout = null;
+
+      function openSubFlyout() {
+        if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+        if (subFlyout) return;
+
+        subFlyout = document.createElement('div');
+        subFlyout.className = 'sticker-flyout';
+        subFlyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:351;min-width:180px;max-height:320px;overflow-y:auto;padding:4px 0;';
+
+        const rect = row.getBoundingClientRect();
+        subFlyout.style.left = (rect.right + 4) + 'px';
+        subFlyout.style.top = rect.top + 'px';
+
+        setTimeout(() => {
+          if (!subFlyout) return;
+          const fr = subFlyout.getBoundingClientRect();
+          if (fr.right > window.innerWidth - 10) {
+            subFlyout.style.left = (rect.left - fr.width - 4) + 'px';
+          }
+          if (fr.bottom > window.innerHeight - 10) {
+            subFlyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
+          }
+        }, 0);
+
+        if (hasChildren) {
+          cat.children.forEach(child => {
+            const sub = createFlyoutCategoryItem(child, library, subFlyout);
+            subFlyout.appendChild(sub);
+          });
+        }
+        if (hasChildren && hasImages) {
+          const sep = document.createElement('div');
+          sep.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;';
+          subFlyout.appendChild(sep);
+        }
+        if (hasImages) {
+          const imgGrid = document.createElement('div');
+          imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 8px;';
+          cat.images.forEach(imgName => {
+            const img = library.find(i => i.name === imgName);
+            if (!img) return;
+            const card = document.createElement('div');
+            card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+            card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
+            card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+            const imgEl = document.createElement('img');
+            imgEl.src = img.dataUrl;
+            imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
+            card.appendChild(imgEl);
+            const name = document.createElement('span');
+            name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+            name.textContent = img.name;
+            card.appendChild(name);
+            card.addEventListener('click', () => {
+              document.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
+              setActiveTool('image-library');
+              pendingImageSrc = img.dataUrl;
+              pendingImageLabel = img.name;
+              document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+              showStatusMessage('Cliquez sur le schéma pour placer "' + img.name + '"');
+            });
+            imgGrid.appendChild(card);
+          });
+          subFlyout.appendChild(imgGrid);
+        }
+
+        subFlyout.addEventListener('mouseenter', () => {
+          if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+        });
+        subFlyout.addEventListener('mouseleave', () => {
+          closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 200);
+        });
+
+        document.body.appendChild(subFlyout);
+      }
+
+      row.addEventListener('mouseenter', openSubFlyout);
+      row.addEventListener('mouseleave', () => {
+        closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 200);
+      });
+    }
+
+    return item;
   }
 
   function showAnnotationManager() { /* géré par settings.js onglet Stickers */ }
