@@ -71,22 +71,6 @@ const Annotations = (() => {
     'train-arrete':     { symbol: '◆', color: '#9060ff', label: 'Arrêté PV' },
   };
 
-  // Annotations personnalisées (chargées depuis Supabase via Store)
-  let customAnnotations = [];
-
-  function loadCustomAnnotations() {
-    try {
-      const saved = Store.getJSON('eic_custom_annotations', null);
-      if (saved) customAnnotations = saved;
-    } catch {}
-  }
-
-  function saveCustomAnnotations() {
-    try {
-      Store.set('eic_custom_annotations', customAnnotations);
-    } catch {}
-  }
-
   /**
    * Calculer le prochain numéro pour un type de tool donné
    */
