@@ -1555,8 +1555,9 @@ const Annotations = (() => {
 
         // Positionner à droite de l'item
         const rect = row.getBoundingClientRect();
-        flyout.style.left = (rect.right + 4) + 'px';
-        flyout.style.top = rect.top + 'px';
+        flyout.style.left = (rect.right) + 'px';
+        flyout.style.top = (rect.top - 4) + 'px';
+        flyout.style.paddingLeft = '4px';
 
         // Vérifier que ça ne sort pas de l'écran à droite
         setTimeout(() => {
@@ -1625,7 +1626,7 @@ const Annotations = (() => {
           if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
         });
         flyout.addEventListener('mouseleave', () => {
-          closeTimeout = setTimeout(closeFlyout, 200);
+          closeTimeout = setTimeout(closeFlyout, 500);
         });
 
         document.body.appendChild(flyout);
@@ -1639,7 +1640,7 @@ const Annotations = (() => {
 
       row.addEventListener('mouseenter', openFlyout);
       row.addEventListener('mouseleave', () => {
-        closeTimeout = setTimeout(closeFlyout, 200);
+        closeTimeout = setTimeout(closeFlyout, 500);
       });
     }
 
@@ -1686,8 +1687,9 @@ const Annotations = (() => {
         subFlyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:351;min-width:180px;max-height:320px;overflow-y:auto;padding:4px 0;';
 
         const rect = row.getBoundingClientRect();
-        subFlyout.style.left = (rect.right + 4) + 'px';
-        subFlyout.style.top = rect.top + 'px';
+        subFlyout.style.left = (rect.right) + 'px';
+        subFlyout.style.top = (rect.top - 4) + 'px';
+        subFlyout.style.paddingLeft = '4px';
 
         setTimeout(() => {
           if (!subFlyout) return;
@@ -1746,7 +1748,7 @@ const Annotations = (() => {
           if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
         });
         subFlyout.addEventListener('mouseleave', () => {
-          closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 200);
+          closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 500);
         });
 
         document.body.appendChild(subFlyout);
@@ -1754,7 +1756,7 @@ const Annotations = (() => {
 
       row.addEventListener('mouseenter', openSubFlyout);
       row.addEventListener('mouseleave', () => {
-        closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 200);
+        closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 500);
       });
     }
 
