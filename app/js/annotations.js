@@ -112,6 +112,16 @@ const Annotations = (() => {
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+      // Mode édition sticker : Enter valide, Escape annule
+      if (editingSticker) {
+        if (e.key === 'Enter') { e.preventDefault(); exitStickerEditMode(); }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          const idx = annotations.indexOf(editingSticker);
+          if (idx >= 0) annotations.splice(idx, 1);
+          exitStickerEditMode();
+        }
+      }
     });
 
     // Bind tool buttons
@@ -179,9 +189,16 @@ const Annotations = (() => {
       }
       // Image depuis la bibliothèque
       else if (activeTool === 'image-library' && pendingImageSrc) {
-        addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
-        hideStatusMessage();
-        // Rester en mode placement pour poser plusieurs fois la même image
+        if (editingSticker) {
+          // En mode édition : déplacer le sticker existant
+          editingSticker.x = viewportPoint.x;
+          editingSticker.y = viewportPoint.y;
+          redraw();
+          saveToLocalStorage();
+        } else {
+          addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
+          // Ne pas rester en mode placement — on est en mode édition maintenant
+        }
       }
       // Texte libre
       else if (activeTool === 'text') {
@@ -256,9 +273,6 @@ const Annotations = (() => {
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
 
       const vp = viewer.viewport.pointFromPixel(event.position);
-      const imgW = (selectedAnnot.imgW || 60);
-      const imgH = (selectedAnnot.imgH || 24);
-      // Convertir taille pixels en viewport approximatif
       const vpSize = getAnnotViewportSize(selectedAnnot);
 
       // Tester les poignées de redimensionnement
@@ -267,7 +281,7 @@ const Annotations = (() => {
         event.preventDefaultAction = true;
         isResizingAnnot = true;
         resizeAnnotHandle = handle;
-        resizeAnnotOrigin = { x: vp.x, y: vp.y, w: selectedAnnot.imgW || 60, h: selectedAnnot.imgH || 24 };
+        resizeAnnotOrigin = { x: vp.x, y: vp.y, vpW: selectedAnnot.vpW || STICKER_VP_WIDTH, vpH: selectedAnnot.vpH || STICKER_VP_HEIGHT };
         return;
       }
 
@@ -292,33 +306,23 @@ const Annotations = (() => {
         redraw();
       } else if (isResizingAnnot && selectedAnnot && resizeAnnotOrigin) {
         const dx = vp.x - resizeAnnotOrigin.x;
-        const dy = vp.y - resizeAnnotOrigin.y;
-        // Calculer le facteur de scale en pixels
-        const viewer = Viewer.getMainViewer();
-        const p1 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(0, 0));
-        const p2 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(dx, dy));
-        const pxDx = p2.x - p1.x;
-        const pxDy = p2.y - p1.y;
-
-        // Resize proportionnel : utiliser le delta le plus grand
-        const ratio = resizeAnnotOrigin.w / resizeAnnotOrigin.h;
+        // Resize proportionnel en unités viewport
+        const ratio = resizeAnnotOrigin.vpW / resizeAnnotOrigin.vpH;
         let delta = 0;
-        if (resizeAnnotHandle.includes('e')) delta = pxDx;
-        else if (resizeAnnotHandle.includes('w')) delta = -pxDx;
-        else if (resizeAnnotHandle.includes('s')) delta = pxDy * ratio;
-        else if (resizeAnnotHandle.includes('n')) delta = -pxDy * ratio;
-        // Pour les coins, prendre le plus grand des deux
+        if (resizeAnnotHandle.includes('e')) delta = dx;
+        else if (resizeAnnotHandle.includes('w')) delta = -dx;
         if (resizeAnnotHandle.length === 2) {
-          const dW = resizeAnnotHandle.includes('e') ? pxDx : -pxDx;
-          const dH = (resizeAnnotHandle.includes('s') ? pxDy : -pxDy) * ratio;
+          const dy = vp.y - resizeAnnotOrigin.y;
+          const dW = resizeAnnotHandle.includes('e') ? dx : -dx;
+          const dH = (resizeAnnotHandle.includes('s') ? dy : -dy) * ratio;
           delta = Math.abs(dW) > Math.abs(dH) ? dW : dH;
         }
 
-        const newW = Math.max(20, resizeAnnotOrigin.w + delta);
-        const newH = Math.max(10, newW / ratio);
+        const newW = Math.max(0.003, resizeAnnotOrigin.vpW + delta);
+        const newH = newW / ratio;
 
-        selectedAnnot.imgW = Math.round(newW);
-        selectedAnnot.imgH = Math.round(newH);
+        selectedAnnot.vpW = newW;
+        selectedAnnot.vpH = newH;
         redraw();
       }
     });
@@ -477,6 +481,10 @@ const Annotations = (() => {
   /**
    * Ajouter une annotation image (ex: machine de secours)
    */
+  // Taille standard des stickers en unités viewport
+  const STICKER_VP_WIDTH = 0.012;
+  const STICKER_VP_HEIGHT = 0.006;
+
   function addImageAnnotation(x, y, src, label) {
     const num = getNextNumber('image');
     const annotation = {
@@ -488,12 +496,131 @@ const Annotations = (() => {
       label: label || '',
       color: '#00a550',
       number: num,
+      vpW: STICKER_VP_WIDTH,
+      vpH: STICKER_VP_HEIGHT,
+      rotation: 0,
+      mirrorX: false,
     };
     pushUndo();
     annotations.push(annotation);
+    // Entrer en mode édition du sticker
+    enterStickerEditMode(annotation);
     redraw();
     saveToLocalStorage();
     return annotation;
+  }
+
+  // === MODE ÉDITION STICKER ===
+  let editingSticker = null;
+  let stickerEditBar = null;
+
+  function enterStickerEditMode(annotation) {
+    editingSticker = annotation;
+    selectedAnnot = annotation;
+
+    // Barre d'outils d'édition
+    const old = document.getElementById('sticker-edit-bar');
+    if (old) old.remove();
+
+    const bar = document.createElement('div');
+    bar.id = 'sticker-edit-bar';
+    bar.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:300;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:var(--mono);font-size:10px;';
+
+    const info = document.createElement('span');
+    info.style.cssText = 'color:var(--accent2);font-weight:600;';
+    info.textContent = 'Sticker : ' + (annotation.label || 'Image');
+    bar.appendChild(info);
+
+    // Taille +/-
+    const sizeLabel = document.createElement('span');
+    sizeLabel.style.cssText = 'color:var(--muted);';
+    sizeLabel.textContent = 'Taille';
+    bar.appendChild(sizeLabel);
+
+    const sizeDown = createEditBtn('−', () => {
+      annotation.vpW *= 0.8;
+      annotation.vpH *= 0.8;
+      redraw();
+    });
+    bar.appendChild(sizeDown);
+
+    const sizeUp = createEditBtn('+', () => {
+      annotation.vpW *= 1.25;
+      annotation.vpH *= 1.25;
+      redraw();
+    });
+    bar.appendChild(sizeUp);
+
+    // Rotation
+    const rotLabel = document.createElement('span');
+    rotLabel.style.cssText = 'color:var(--muted);';
+    rotLabel.textContent = 'Rotation';
+    bar.appendChild(rotLabel);
+
+    const rotLeft = createEditBtn('↶', () => {
+      annotation.rotation = (annotation.rotation || 0) - 15;
+      redraw();
+    });
+    bar.appendChild(rotLeft);
+
+    const rotRight = createEditBtn('↷', () => {
+      annotation.rotation = (annotation.rotation || 0) + 15;
+      redraw();
+    });
+    bar.appendChild(rotRight);
+
+    // Miroir
+    const mirrorBtn = createEditBtn('⇔ Miroir', () => {
+      annotation.mirrorX = !annotation.mirrorX;
+      redraw();
+    });
+    bar.appendChild(mirrorBtn);
+
+    // Séparateur
+    const sep = document.createElement('span');
+    sep.style.cssText = 'width:1px;height:20px;background:var(--border);';
+    bar.appendChild(sep);
+
+    // Valider
+    const okBtn = document.createElement('button');
+    okBtn.style.cssText = 'padding:4px 14px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+    okBtn.textContent = '✓ Valider';
+    okBtn.addEventListener('click', () => exitStickerEditMode());
+    bar.appendChild(okBtn);
+
+    // Annuler
+    const cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'padding:4px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+    cancelBtn.textContent = '✕';
+    cancelBtn.addEventListener('click', () => {
+      // Supprimer le sticker
+      const idx = annotations.indexOf(annotation);
+      if (idx >= 0) annotations.splice(idx, 1);
+      exitStickerEditMode();
+    });
+    bar.appendChild(cancelBtn);
+
+    document.body.appendChild(bar);
+    stickerEditBar = bar;
+
+    showStatusMessage('Déplacez le sticker, ajustez taille/rotation, puis Validez');
+  }
+
+  function exitStickerEditMode() {
+    editingSticker = null;
+    selectedAnnot = null;
+    if (stickerEditBar) { stickerEditBar.remove(); stickerEditBar = null; }
+    hideStatusMessage();
+    redraw();
+    saveToLocalStorage();
+  }
+
+  function createEditBtn(text, onClick) {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'padding:3px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;cursor:pointer;';
+    btn.textContent = text;
+    btn.addEventListener('click', onClick);
+    return btn;
   }
 
   /**
@@ -1295,14 +1422,7 @@ const Annotations = (() => {
   // === Interaction annotations image ===
 
   function getAnnotViewportSize(a) {
-    // Convertir la taille pixel en viewport (approximatif)
-    const viewer = Viewer.getMainViewer();
-    if (!viewer) return { w: 0.01, h: 0.005 };
-    const w = a.imgW || 60;
-    const h = a.imgH || 24;
-    const c = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(a.x, a.y));
-    const c2 = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(c.x + w, c.y + h));
-    return { w: c2.x - a.x, h: c2.y - a.y };
+    return { w: a.vpW || STICKER_VP_WIDTH, h: a.vpH || STICKER_VP_HEIGHT };
   }
 
   function isPointInAnnot(px, py, a, vpSize) {
@@ -1342,11 +1462,21 @@ const Annotations = (() => {
   const imageCache = {};
 
   function drawImageAnnotation(ctx, pos, annotation) {
-    const imgW = annotation.imgW || 60;
-    const imgH = annotation.imgH || 24;
-    const x = pos.x - imgW / 2;
-    const y = pos.y - imgH / 2;
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    // Convertir taille viewport en pixels écran
+    const vpW = annotation.vpW || STICKER_VP_WIDTH;
+    const vpH = annotation.vpH || STICKER_VP_HEIGHT;
+    const topLeft = viewer.viewport.viewportToViewerElementCoordinates(
+      new OpenSeadragon.Point(annotation.x - vpW / 2, annotation.y - vpH / 2));
+    const botRight = viewer.viewport.viewportToViewerElementCoordinates(
+      new OpenSeadragon.Point(annotation.x + vpW / 2, annotation.y + vpH / 2));
+    const imgW = botRight.x - topLeft.x;
+    const imgH = botRight.y - topLeft.y;
+
     const isSel = selectedAnnot && selectedAnnot.id === annotation.id;
+    const isEditing = editingSticker && editingSticker.id === annotation.id;
 
     // Charger l'image (mise en cache)
     if (!imageCache[annotation.src]) {
@@ -1357,42 +1487,45 @@ const Annotations = (() => {
         redraw();
       };
       imageCache[annotation.src] = 'loading';
-      ctx.save();
-      ctx.fillStyle = annotation.color;
-      ctx.globalAlpha = 0.5;
-      ctx.fillRect(x, y, imgW, imgH);
-      ctx.restore();
       return;
     }
-
     if (imageCache[annotation.src] === 'loading') return;
 
     const img = imageCache[annotation.src];
+    const rot = (annotation.rotation || 0) * Math.PI / 180;
+    const mirror = annotation.mirrorX ? -1 : 1;
 
     ctx.save();
-    ctx.drawImage(img, x, y, imgW, imgH);
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(rot);
+    ctx.scale(mirror, 1);
+    ctx.drawImage(img, -imgW / 2, -imgH / 2, imgW, imgH);
+    ctx.restore();
 
     // Cadre de sélection + poignées
-    if (isSel) {
-      ctx.strokeStyle = '#ff9520';
+    if (isSel || isEditing) {
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(rot);
+      ctx.strokeStyle = isEditing ? '#00d4a0' : '#ff9520';
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 3]);
-      ctx.strokeRect(x - 1, y - 1, imgW + 2, imgH + 2);
+      ctx.strokeRect(-imgW / 2 - 1, -imgH / 2 - 1, imgW + 2, imgH + 2);
       ctx.setLineDash([]);
 
-      // 4 poignées aux coins
       const hs = 5;
       const corners = [
-        [x, y], [x + imgW, y],
-        [x, y + imgH], [x + imgW, y + imgH],
+        [-imgW / 2, -imgH / 2], [imgW / 2, -imgH / 2],
+        [-imgW / 2, imgH / 2], [imgW / 2, imgH / 2],
       ];
       corners.forEach(([cx, cy]) => {
         ctx.fillStyle = '#fff';
         ctx.fillRect(cx - hs, cy - hs, hs * 2, hs * 2);
-        ctx.strokeStyle = '#ff9520';
+        ctx.strokeStyle = isEditing ? '#00d4a0' : '#ff9520';
         ctx.lineWidth = 1.5;
         ctx.strokeRect(cx - hs, cy - hs, hs * 2, hs * 2);
       });
+      ctx.restore();
     }
 
     // Numéro en cercle (légende)
