@@ -2170,6 +2170,8 @@ const Annotations = (() => {
     setupLegend,
     refreshLegend,
     setupAnnotationManager,
+    showAnnotationManager,
+    renderPinnedAnnotations,
     getActiveTool,
   };
 })();

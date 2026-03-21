@@ -96,6 +96,7 @@ const Settings = (() => {
     else if (activeTab === 'aiguilles') renderInfraTab(container, 'aiguille', 'Aiguille');
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
+    else if (activeTab === 'annotations') renderAnnotationsSettings(container);
 
     // Synchroniser la barre du bas
     try { Search.reloadLayout(); } catch {}
@@ -1535,6 +1536,217 @@ const Settings = (() => {
       });
     });
     return result.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  }
+
+  // =========================================
+  // ANNOTATIONS
+  // =========================================
+
+  function renderAnnotationsSettings(container) {
+    // Déléguer au système d'annotations — on crée le contenu inline
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'padding:0;';
+
+    // Sous-onglets : Annotations / Bibliothèque d'images
+    const subTabs = document.createElement('div');
+    subTabs.style.cssText = 'display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:6px;';
+    let activeSubTab = 'annots';
+
+    function createSubTab(id, label) {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'flex:1;padding:6px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--mono);font-size:9px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;';
+      btn.textContent = label;
+      if (id === activeSubTab) { btn.style.borderBottomColor = 'var(--accent2)'; btn.style.color = 'var(--text)'; }
+      btn.addEventListener('click', () => {
+        activeSubTab = id;
+        subTabs.querySelectorAll('button').forEach(b => { b.style.borderBottomColor = 'transparent'; b.style.color = 'var(--muted)'; });
+        btn.style.borderBottomColor = 'var(--accent2)'; btn.style.color = 'var(--text)';
+        renderSubContent();
+      });
+      return btn;
+    }
+    subTabs.appendChild(createSubTab('annots', 'Annotations'));
+    subTabs.appendChild(createSubTab('images', 'Bibliothèque d\'images'));
+    wrapper.appendChild(subTabs);
+
+    const subContent = document.createElement('div');
+    wrapper.appendChild(subContent);
+    container.appendChild(wrapper);
+
+    function renderSubContent() {
+      subContent.innerHTML = '';
+      if (activeSubTab === 'annots') renderAnnotsList();
+      else renderImagesList();
+    }
+
+    // === Sous-onglet Annotations ===
+    function renderAnnotsList() {
+      const customAnnotations = Store.getJSON('eic_custom_annotations', []);
+
+      // Bouton créer
+      const addBtn = document.createElement('button');
+      addBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
+      addBtn.textContent = '+ Créer une annotation';
+      addBtn.addEventListener('click', () => {
+        // Ouvrir le gestionnaire complet (modale Annotations)
+        if (typeof Annotations !== 'undefined' && Annotations.showAnnotationManager) {
+          Annotations.showAnnotationManager();
+        }
+      });
+      subContent.appendChild(addBtn);
+
+      if (customAnnotations.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
+        empty.textContent = 'Aucune annotation personnalisée';
+        subContent.appendChild(empty);
+        return;
+      }
+
+      customAnnotations.forEach((custom, index) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+        // Icône
+        const icon = document.createElement('span');
+        icon.style.cssText = 'font-size:14px;width:22px;text-align:center;flex-shrink:0;';
+        if (custom.imageDataUrl) icon.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:18px;max-width:26px;">';
+        else if (custom.imageSrc) icon.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:18px;max-width:26px;">';
+        else { icon.textContent = custom.symbol; icon.style.color = custom.color; }
+        row.appendChild(icon);
+
+        // Nom
+        const name = document.createElement('span');
+        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.textContent = custom.name;
+        row.appendChild(name);
+
+        // Badge type
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-family:var(--mono);font-size:8px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
+        badge.textContent = custom.placement === 'image' ? 'image' : custom.placement === 'line' ? 'ligne' : 'point';
+        row.appendChild(badge);
+
+        // Épingler
+        const pinBtn = document.createElement('button');
+        pinBtn.className = 'zone-item-btn';
+        pinBtn.textContent = custom.pinned ? '📌' : '📍';
+        pinBtn.title = custom.pinned ? 'Désépingler' : 'Épingler dans la sidebar';
+        pinBtn.style.opacity = custom.pinned ? '1' : '0.4';
+        pinBtn.addEventListener('click', () => {
+          customAnnotations[index].pinned = !customAnnotations[index].pinned;
+          Store.set('eic_custom_annotations', customAnnotations);
+          if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
+          renderAnnotsList();
+        });
+        row.appendChild(pinBtn);
+
+        // Supprimer
+        const delBtn = document.createElement('button');
+        delBtn.className = 'zone-item-btn delete';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', () => {
+          if (!confirm('Supprimer "' + custom.name + '" ?')) return;
+          customAnnotations.splice(index, 1);
+          Store.set('eic_custom_annotations', customAnnotations);
+          if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
+          renderAnnotsList();
+        });
+        row.appendChild(delBtn);
+
+        subContent.appendChild(row);
+      });
+    }
+
+    // === Sous-onglet Images ===
+    function renderImagesList() {
+      const imageLibrary = Store.getJSON('eic_image_library', []);
+      const DEFAULT_IMAGES = [
+        '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
+        'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
+        'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
+      ];
+
+      // Upload
+      const uploadBtn = document.createElement('button');
+      uploadBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
+      uploadBtn.textContent = '+ Ajouter des images';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.multiple = true; fileInput.style.display = 'none';
+      uploadBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+        const lib = Store.getJSON('eic_image_library', []);
+        Array.from(fileInput.files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            lib.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: ev.target.result });
+            Store.set('eic_image_library', lib);
+            renderImagesList();
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+      subContent.appendChild(uploadBtn);
+      subContent.appendChild(fileInput);
+
+      // Grille
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
+
+      // Par défaut
+      const defLabel = document.createElement('div');
+      defLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;padding-top:2px;';
+      defLabel.textContent = 'Images par défaut';
+      grid.appendChild(defLabel);
+      DEFAULT_IMAGES.forEach(f => {
+        grid.appendChild(createSettingsImgCard('img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true));
+      });
+
+      // Uploadées
+      if (imageLibrary.length > 0) {
+        const uplLabel = document.createElement('div');
+        uplLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;padding-top:6px;';
+        uplLabel.textContent = 'Images uploadées';
+        grid.appendChild(uplLabel);
+        imageLibrary.forEach((img, i) => {
+          grid.appendChild(createSettingsImgCard(img.dataUrl, img.name, false, i));
+        });
+      }
+      subContent.appendChild(grid);
+    }
+
+    function createSettingsImgCard(src, name, isDefault, libIndex) {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
+
+      const img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-height:40px;max-width:100%;object-fit:contain;';
+      card.appendChild(img);
+
+      const label = document.createElement('span');
+      label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+      label.textContent = name;
+      card.appendChild(label);
+
+      if (!isDefault) {
+        const del = document.createElement('button');
+        del.style.cssText = 'position:absolute;top:1px;right:1px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:9px;cursor:pointer;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;';
+        del.textContent = '✕';
+        del.addEventListener('click', () => {
+          const lib = Store.getJSON('eic_image_library', []);
+          lib.splice(libIndex, 1);
+          Store.set('eic_image_library', lib);
+          renderImagesList();
+        });
+        card.appendChild(del);
+      }
+      return card;
+    }
+
+    renderSubContent();
   }
 
   function renderTables(container) {
