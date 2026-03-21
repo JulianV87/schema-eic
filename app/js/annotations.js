@@ -145,29 +145,31 @@ const Annotations = (() => {
       // Si on vient de finir un drag/resize, ne pas traiter le clic
       if (isDraggingAnnot || isResizingAnnot) return;
 
-      // Vérifier si on clique sur un sticker existant (même sans outil actif)
+      // Vérifier si on clique sur un sticker
       const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y);
-      if (hitAnnot && !editingSticker) {
+
+      // En mode édition : clic sur le même sticker → rien, clic sur un autre → coller et sélectionner l'autre, clic ailleurs → coller
+      if (editingSticker) {
+        if (hitAnnot && hitAnnot.id === editingSticker.id) {
+          // Clic sur le sticker en cours d'édition — laisser le drag gérer
+          return;
+        }
+        // Clic ailleurs ou sur un autre sticker → coller le sticker en cours
+        event.preventDefaultAction = true;
+        exitStickerEditMode();
+        // Si on a cliqué sur un autre sticker, le sélectionner
+        if (hitAnnot) {
+          enterStickerEditMode(hitAnnot);
+          redraw();
+        }
+        return;
+      }
+
+      // Pas en mode édition : clic sur un sticker → le sélectionner
+      if (hitAnnot) {
         event.preventDefaultAction = true;
         enterStickerEditMode(hitAnnot);
         redraw();
-        return;
-      }
-
-      // Si en mode édition et clic ailleurs que sur le sticker → déplacer le sticker
-      if (editingSticker && activeTool === 'image-library') {
-        event.preventDefaultAction = true;
-        editingSticker.x = viewportPoint.x;
-        editingSticker.y = viewportPoint.y;
-        redraw();
-        saveToLocalStorage();
-        return;
-      }
-
-      // Désélectionner si on clique ailleurs sans outil
-      if (selectedAnnot && !activeTool) {
-        exitStickerEditMode();
-        event.preventDefaultAction = true;
         return;
       }
 
@@ -598,17 +600,10 @@ const Annotations = (() => {
     });
     bar.appendChild(delBtn);
 
-    // Valider
-    const okBtn = document.createElement('button');
-    okBtn.style.cssText = 'padding:4px 14px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
-    okBtn.textContent = '✓ OK';
-    okBtn.addEventListener('click', () => exitStickerEditMode());
-    bar.appendChild(okBtn);
-
     document.body.appendChild(bar);
     stickerEditBar = bar;
 
-    showStatusMessage('Drag pour déplacer, poignées pour redimensionner. Entrée = valider, Suppr = supprimer');
+    showStatusMessage('Cliquez en dehors pour coller — Suppr pour supprimer');
   }
 
   function exitStickerEditMode() {
