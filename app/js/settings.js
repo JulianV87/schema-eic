@@ -1876,6 +1876,9 @@ const Settings = (() => {
     }
 
     // ========== CATÉGORIES ==========
+    // Catégories ouvertes (persistant pendant la session paramètres)
+    const expandedCats = new Set();
+
     function renderCategoriesTree() {
       const categories = getStickerCategories();
 
@@ -1887,54 +1890,75 @@ const Settings = (() => {
         if (!n || !n.trim()) return;
         categories.push({ id: 'cat-' + Date.now(), nom: n.trim(), children: [] });
         saveStickerCategories(categories);
+        subContent.innerHTML = '';
         renderCategoriesTree();
       });
       subContent.appendChild(addBtn);
 
+      function hasContent(cat) {
+        return (cat.children && cat.children.length > 0) || (cat.images && cat.images.length > 0);
+      }
+
       function renderNode(cat, depth, parentArray) {
+        const isExpanded = expandedCats.has(cat.id);
+        const hasChildren = hasContent(cat);
+
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 4px 4px ' + (depth * 16 + 4) + 'px;border-bottom:1px solid var(--border);';
         row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
         row.addEventListener('mouseleave', () => row.style.background = 'none');
 
-        // Icône arbre
-        if (depth > 0) {
-          const indent = document.createElement('span');
-          indent.style.cssText = 'color:var(--border);font-size:10px;';
-          indent.textContent = '└';
-          row.appendChild(indent);
+        // Flèche ouvrir/fermer
+        const arrow = document.createElement('span');
+        arrow.style.cssText = 'font-size:9px;width:12px;text-align:center;flex-shrink:0;cursor:pointer;color:var(--muted);user-select:none;';
+        if (hasChildren) {
+          arrow.textContent = isExpanded ? '▼' : '▶';
+          arrow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (expandedCats.has(cat.id)) expandedCats.delete(cat.id);
+            else expandedCats.add(cat.id);
+            subContent.innerHTML = '';
+            renderCategoriesTree();
+          });
+        } else {
+          arrow.textContent = '·';
         }
+        row.appendChild(arrow);
 
+        // Nom (cliquable pour ouvrir/fermer)
         const name = document.createElement('span');
-        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:' + (hasChildren ? 'pointer' : 'default') + ';';
         name.textContent = cat.nom;
+        if (hasChildren) {
+          name.addEventListener('click', () => {
+            if (expandedCats.has(cat.id)) expandedCats.delete(cat.id);
+            else expandedCats.add(cat.id);
+            subContent.innerHTML = '';
+            renderCategoriesTree();
+          });
+        }
         row.appendChild(name);
 
-        // Nombre de stickers dans cette catégorie
-        const stickers = getStickers();
-        const count = stickers.filter(s => s.categoryId === cat.id).length;
-        if (count > 0) {
-          const badge = document.createElement('span');
-          badge.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);';
-          badge.textContent = count + ' sticker' + (count > 1 ? 's' : '');
-          row.appendChild(badge);
-        }
-
-        // Nombre d'images dans cette catégorie
+        // Compteurs
+        const childCount = (cat.children || []).length;
         const imgCount = (cat.images || []).length;
-        if (imgCount > 0) {
-          const imgBadge = document.createElement('span');
-          imgBadge.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);';
-          imgBadge.textContent = imgCount + ' img';
-          row.appendChild(imgBadge);
+        if (childCount > 0 || imgCount > 0) {
+          const info = document.createElement('span');
+          info.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);flex-shrink:0;';
+          const parts = [];
+          if (imgCount > 0) parts.push(imgCount + ' img');
+          if (childCount > 0) parts.push(childCount + ' sous-cat.');
+          info.textContent = parts.join(' · ');
+          row.appendChild(info);
         }
 
         // Bouton assigner des images
         const imgBtn = document.createElement('button');
         imgBtn.className = 'zone-item-btn';
         imgBtn.textContent = '🖼';
-        imgBtn.title = 'Assigner des images de la bibliothèque';
-        imgBtn.addEventListener('click', () => {
+        imgBtn.title = 'Assigner des images';
+        imgBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           showCategoryImagePicker(cat, categories);
         });
         row.appendChild(imgBtn);
@@ -1944,12 +1968,14 @@ const Settings = (() => {
         addSubBtn.className = 'zone-item-btn';
         addSubBtn.textContent = '+';
         addSubBtn.title = 'Ajouter une sous-catégorie';
-        addSubBtn.addEventListener('click', () => {
+        addSubBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const n = prompt('Nom de la sous-catégorie dans "' + cat.nom + '" :');
           if (!n || !n.trim()) return;
           if (!cat.children) cat.children = [];
           cat.children.push({ id: 'cat-' + Date.now(), nom: n.trim(), children: [] });
           saveStickerCategories(categories);
+          expandedCats.add(cat.id);
           subContent.innerHTML = '';
           renderCategoriesTree();
         });
@@ -1959,7 +1985,8 @@ const Settings = (() => {
         const renameBtn = document.createElement('button');
         renameBtn.className = 'zone-item-btn';
         renameBtn.textContent = '✎';
-        renameBtn.addEventListener('click', () => {
+        renameBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const n = prompt('Nom :', cat.nom);
           if (!n || !n.trim()) return;
           cat.nom = n.trim();
@@ -1973,7 +2000,8 @@ const Settings = (() => {
         const delBtn = document.createElement('button');
         delBtn.className = 'zone-item-btn delete';
         delBtn.textContent = '✕';
-        delBtn.addEventListener('click', () => {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           if (!confirm('Supprimer "' + cat.nom + '" et ses sous-catégories ?')) return;
           const idx = parentArray.indexOf(cat);
           if (idx >= 0) parentArray.splice(idx, 1);
@@ -1985,25 +2013,28 @@ const Settings = (() => {
 
         subContent.appendChild(row);
 
-        // Miniatures des images assignées
-        if ((cat.images || []).length > 0) {
-          const thumbRow = document.createElement('div');
-          thumbRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:2px 4px 4px ' + (depth * 16 + (depth > 0 ? 20 : 4)) + 'px;';
-          const library = getStickerLibrary();
-          cat.images.forEach(imgName => {
-            const img = library.find(i => i.name === imgName);
-            if (!img) return;
-            const thumb = document.createElement('img');
-            thumb.src = img.dataUrl;
-            thumb.title = img.name;
-            thumb.style.cssText = 'max-height:24px;max-width:40px;object-fit:contain;border:1px solid var(--border);border-radius:2px;padding:1px;background:var(--surface2);';
-            thumbRow.appendChild(thumb);
-          });
-          subContent.appendChild(thumbRow);
-        }
+        // Contenu déplié : miniatures + enfants
+        if (isExpanded) {
+          // Miniatures des images assignées
+          if ((cat.images || []).length > 0) {
+            const thumbRow = document.createElement('div');
+            thumbRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:3px 4px 5px ' + (depth * 16 + 20) + 'px;';
+            const library = getStickerLibrary();
+            cat.images.forEach(imgName => {
+              const img = library.find(i => i.name === imgName);
+              if (!img) return;
+              const thumb = document.createElement('img');
+              thumb.src = img.dataUrl;
+              thumb.title = img.name;
+              thumb.style.cssText = 'max-height:28px;max-width:44px;object-fit:contain;border:1px solid var(--border);border-radius:2px;padding:1px;background:var(--surface2);';
+              thumbRow.appendChild(thumb);
+            });
+            subContent.appendChild(thumbRow);
+          }
 
-        // Enfants
-        (cat.children || []).forEach(child => renderNode(child, depth + 1, cat.children));
+          // Enfants
+          (cat.children || []).forEach(child => renderNode(child, depth + 1, cat.children));
+        }
       }
 
       categories.forEach(cat => renderNode(cat, 0, categories));
