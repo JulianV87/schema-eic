@@ -1661,13 +1661,15 @@ const Settings = (() => {
     }
 
     // === Sous-onglet Images ===
+    const SETTINGS_DEFAULT_IMAGES = [
+      '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
+      'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
+      'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
+    ];
+
     function renderImagesList() {
+      subContent.innerHTML = '';
       const imageLibrary = Store.getJSON('eic_image_library', []);
-      const DEFAULT_IMAGES = [
-        '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
-        'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
-        'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
-      ];
 
       // Upload
       const uploadBtn = document.createElement('button');
@@ -1678,12 +1680,17 @@ const Settings = (() => {
       uploadBtn.addEventListener('click', () => fileInput.click());
       fileInput.addEventListener('change', () => {
         const lib = Store.getJSON('eic_image_library', []);
-        Array.from(fileInput.files).forEach(file => {
+        let loaded = 0;
+        const files = Array.from(fileInput.files);
+        files.forEach(file => {
           const reader = new FileReader();
           reader.onload = (ev) => {
             lib.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: ev.target.result });
-            Store.set('eic_image_library', lib);
-            renderImagesList();
+            loaded++;
+            if (loaded === files.length) {
+              Store.set('eic_image_library', lib);
+              renderImagesList();
+            }
           };
           reader.readAsDataURL(file);
         });
@@ -1700,8 +1707,9 @@ const Settings = (() => {
       defLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;padding-top:2px;';
       defLabel.textContent = 'Images par défaut';
       grid.appendChild(defLabel);
-      DEFAULT_IMAGES.forEach(f => {
-        grid.appendChild(createSettingsImgCard('img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true));
+      SETTINGS_DEFAULT_IMAGES.forEach(f => {
+        const card = createSettingsImgCard('/img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '));
+        grid.appendChild(card);
       });
 
       // Uploadées
@@ -1711,13 +1719,25 @@ const Settings = (() => {
         uplLabel.textContent = 'Images uploadées';
         grid.appendChild(uplLabel);
         imageLibrary.forEach((img, i) => {
-          grid.appendChild(createSettingsImgCard(img.dataUrl, img.name, false, i));
+          const card = createSettingsImgCard(img.dataUrl, img.name);
+          // Bouton supprimer
+          const del = document.createElement('button');
+          del.style.cssText = 'position:absolute;top:1px;right:1px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:9px;cursor:pointer;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;';
+          del.textContent = '✕';
+          del.addEventListener('click', () => {
+            const freshLib = Store.getJSON('eic_image_library', []);
+            freshLib.splice(i, 1);
+            Store.set('eic_image_library', freshLib);
+            renderImagesList();
+          });
+          card.appendChild(del);
+          grid.appendChild(card);
         });
       }
       subContent.appendChild(grid);
     }
 
-    function createSettingsImgCard(src, name, isDefault, libIndex) {
+    function createSettingsImgCard(src, name) {
       const card = document.createElement('div');
       card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
 
@@ -1731,18 +1751,6 @@ const Settings = (() => {
       label.textContent = name;
       card.appendChild(label);
 
-      if (!isDefault) {
-        const del = document.createElement('button');
-        del.style.cssText = 'position:absolute;top:1px;right:1px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:9px;cursor:pointer;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;';
-        del.textContent = '✕';
-        del.addEventListener('click', () => {
-          const lib = Store.getJSON('eic_image_library', []);
-          lib.splice(libIndex, 1);
-          Store.set('eic_image_library', lib);
-          renderImagesList();
-        });
-        card.appendChild(del);
-      }
       return card;
     }
 

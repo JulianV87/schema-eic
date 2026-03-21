@@ -1835,7 +1835,7 @@ const Annotations = (() => {
       function renderImgOptions() {
         imgGrid.innerHTML = '';
         const allImgs = [
-          ...DEFAULT_IMAGES.map(f => ({ src: 'img/' + f, name: f.replace(/_nobg|\.png/g, '').replace(/_/g, ' ') })),
+          ...DEFAULT_IMAGES.map(f => ({ src: '/img/' + f, name: f.replace(/_nobg|\.png/g, '').replace(/_/g, ' ') })),
           ...imageLibrary.map(i => ({ src: i.dataUrl, name: i.name })),
         ];
         allImgs.forEach(img => {
@@ -1963,7 +1963,7 @@ const Annotations = (() => {
       defLabel.textContent = 'Images par défaut';
       gridDiv.appendChild(defLabel);
       DEFAULT_IMAGES.forEach(f => {
-        gridDiv.appendChild(createImgCard('img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true));
+        gridDiv.appendChild(createImgCard('/img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true));
       });
 
       // Images uploadées
