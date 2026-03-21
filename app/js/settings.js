@@ -1920,6 +1920,25 @@ const Settings = (() => {
           row.appendChild(badge);
         }
 
+        // Nombre d'images dans cette catégorie
+        const imgCount = (cat.images || []).length;
+        if (imgCount > 0) {
+          const imgBadge = document.createElement('span');
+          imgBadge.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);';
+          imgBadge.textContent = imgCount + ' img';
+          row.appendChild(imgBadge);
+        }
+
+        // Bouton assigner des images
+        const imgBtn = document.createElement('button');
+        imgBtn.className = 'zone-item-btn';
+        imgBtn.textContent = '🖼';
+        imgBtn.title = 'Assigner des images de la bibliothèque';
+        imgBtn.addEventListener('click', () => {
+          showCategoryImagePicker(cat, categories);
+        });
+        row.appendChild(imgBtn);
+
         // Ajouter sous-catégorie
         const addSubBtn = document.createElement('button');
         addSubBtn.className = 'zone-item-btn';
@@ -1930,9 +1949,7 @@ const Settings = (() => {
           if (!n || !n.trim()) return;
           if (!cat.children) cat.children = [];
           cat.children.push({ id: 'cat-' + Date.now(), nom: n.trim(), children: [] });
-          saveStickerCategories(getStickerCategories().map(c => updateCatInTree(c, cat.id, cat)));
-          // Relire et re-render
-          const fresh = getStickerCategories();
+          saveStickerCategories(categories);
           subContent.innerHTML = '';
           renderCategoriesTree();
         });
@@ -1968,11 +1985,135 @@ const Settings = (() => {
 
         subContent.appendChild(row);
 
+        // Miniatures des images assignées
+        if ((cat.images || []).length > 0) {
+          const thumbRow = document.createElement('div');
+          thumbRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:2px 4px 4px ' + (depth * 16 + (depth > 0 ? 20 : 4)) + 'px;';
+          const library = getStickerLibrary();
+          cat.images.forEach(imgName => {
+            const img = library.find(i => i.name === imgName);
+            if (!img) return;
+            const thumb = document.createElement('img');
+            thumb.src = img.dataUrl;
+            thumb.title = img.name;
+            thumb.style.cssText = 'max-height:24px;max-width:40px;object-fit:contain;border:1px solid var(--border);border-radius:2px;padding:1px;background:var(--surface2);';
+            thumbRow.appendChild(thumb);
+          });
+          subContent.appendChild(thumbRow);
+        }
+
         // Enfants
         (cat.children || []).forEach(child => renderNode(child, depth + 1, cat.children));
       }
 
       categories.forEach(cat => renderNode(cat, 0, categories));
+    }
+
+    function showCategoryImagePicker(cat, allCategories) {
+      const old = document.getElementById('cat-image-picker-modal');
+      if (old) old.remove();
+
+      const library = getStickerLibrary();
+      if (library.length === 0) {
+        alert('Aucune image dans la bibliothèque. Ajoutez-en d\'abord dans l\'onglet Bibliothèque.');
+        return;
+      }
+
+      const currentImages = new Set(cat.images || []);
+
+      const overlay = document.createElement('div');
+      overlay.id = 'cat-image-picker-modal';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
+
+      const panel = document.createElement('div');
+      panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:420px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+
+      // Header
+      const header = document.createElement('div');
+      header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+      const title = document.createElement('span');
+      title.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);';
+      title.textContent = 'Images — ' + cat.nom;
+      header.appendChild(title);
+      const closeBtn = document.createElement('button');
+      closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;';
+      closeBtn.textContent = '✕';
+      closeBtn.addEventListener('click', () => overlay.remove());
+      header.appendChild(closeBtn);
+      panel.appendChild(header);
+
+      // Grille avec cases à cocher
+      const gridDiv = document.createElement('div');
+      gridDiv.style.cssText = 'overflow-y:auto;flex:1;padding:10px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;';
+
+      library.forEach(img => {
+        const card = document.createElement('label');
+        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color 0.15s;';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = currentImages.has(img.name);
+        cb.style.cssText = 'accent-color:var(--accent2);cursor:pointer;align-self:flex-end;';
+        cb.addEventListener('change', () => {
+          if (cb.checked) currentImages.add(img.name);
+          else currentImages.delete(img.name);
+          updateCount();
+          card.style.borderColor = cb.checked ? 'var(--accent2)' : 'var(--border)';
+        });
+        card.appendChild(cb);
+        if (cb.checked) card.style.borderColor = 'var(--accent2)';
+
+        const imgEl = document.createElement('img');
+        imgEl.src = img.dataUrl;
+        imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
+        card.appendChild(imgEl);
+
+        const label = document.createElement('span');
+        label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+        label.textContent = img.name;
+        card.appendChild(label);
+
+        gridDiv.appendChild(card);
+      });
+      panel.appendChild(gridDiv);
+
+      // Footer
+      const footer = document.createElement('div');
+      footer.style.cssText = 'padding:8px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+      const countEl = document.createElement('span');
+      countEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--muted);';
+      footer.appendChild(countEl);
+
+      function updateCount() {
+        countEl.textContent = currentImages.size + ' image' + (currentImages.size > 1 ? 's' : '') + ' sélectionnée' + (currentImages.size > 1 ? 's' : '');
+      }
+      updateCount();
+
+      const btnGroup = document.createElement('div');
+      btnGroup.style.cssText = 'display:flex;gap:6px;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.style.cssText = 'padding:5px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      cancelBtn.textContent = 'Annuler';
+      cancelBtn.addEventListener('click', () => overlay.remove());
+      btnGroup.appendChild(cancelBtn);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.style.cssText = 'padding:5px 16px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+      saveBtn.textContent = 'Enregistrer';
+      saveBtn.addEventListener('click', () => {
+        // Mettre à jour la catégorie
+        cat.images = [...currentImages];
+        saveStickerCategories(allCategories);
+        overlay.remove();
+        subContent.innerHTML = '';
+        renderCategoriesTree();
+      });
+      btnGroup.appendChild(saveBtn);
+      footer.appendChild(btnGroup);
+      panel.appendChild(footer);
+
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
     }
 
     function updateCatInTree(node, targetId, updated) {
