@@ -1510,18 +1510,187 @@ const Annotations = (() => {
     });
   }
 
+  // Flyout ouvert actuellement (un seul à la fois par niveau)
+  let activeFlyoutChain = []; // [{flyout, closeTimeout}]
+
+  function closeAllFlyouts() {
+    activeFlyoutChain.forEach(entry => {
+      if (entry.closeTimeout) clearTimeout(entry.closeTimeout);
+      if (entry.flyout && entry.flyout.parentNode) entry.flyout.remove();
+    });
+    activeFlyoutChain = [];
+  }
+
+  function closeFlyoutsFrom(level) {
+    for (let i = activeFlyoutChain.length - 1; i >= level; i--) {
+      const entry = activeFlyoutChain[i];
+      if (entry.closeTimeout) clearTimeout(entry.closeTimeout);
+      if (entry.flyout && entry.flyout.parentNode) entry.flyout.remove();
+      activeFlyoutChain.pop();
+    }
+  }
+
+  function buildFlyoutContent(cat, library, level) {
+    const hasChildren = (cat.children && cat.children.length > 0);
+    const hasImages = (cat.images && cat.images.length > 0);
+
+    const flyout = document.createElement('div');
+    flyout.className = 'sticker-flyout';
+    flyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:' + (350 + level) + ';min-width:180px;max-height:400px;overflow-y:auto;padding:4px 0;';
+
+    if (hasChildren) {
+      cat.children.forEach(child => {
+        const subRow = buildCatRow(child, library, level + 1);
+        flyout.appendChild(subRow);
+      });
+    }
+    if (hasChildren && hasImages) {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;';
+      flyout.appendChild(sep);
+    }
+    if (hasImages) {
+      const imgGrid = document.createElement('div');
+      imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 8px;';
+      cat.images.forEach(imgName => {
+        const img = library.find(i => i.name === imgName);
+        if (!img) return;
+        const card = document.createElement('div');
+        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+        card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
+        card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+        const imgEl = document.createElement('img');
+        imgEl.src = img.dataUrl;
+        imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
+        card.appendChild(imgEl);
+        const name = document.createElement('span');
+        name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+        name.textContent = img.name;
+        card.appendChild(name);
+        card.addEventListener('click', () => {
+          closeAllFlyouts();
+          setActiveTool('image-library');
+          pendingImageSrc = img.dataUrl;
+          pendingImageLabel = img.name;
+          document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+          showStatusMessage('Cliquez sur le schéma pour placer "' + img.name + '"');
+        });
+        imgGrid.appendChild(card);
+      });
+      flyout.appendChild(imgGrid);
+    }
+
+    // Garder le flyout ouvert tant que la souris est dessus
+    flyout.addEventListener('mouseenter', () => {
+      // Annuler la fermeture de ce niveau et tous les parents
+      activeFlyoutChain.forEach(entry => {
+        if (entry.closeTimeout) { clearTimeout(entry.closeTimeout); entry.closeTimeout = null; }
+      });
+    });
+    flyout.addEventListener('mouseleave', () => {
+      // Programmer la fermeture depuis ce niveau
+      const entry = activeFlyoutChain[level];
+      if (entry) {
+        entry.closeTimeout = setTimeout(() => closeFlyoutsFrom(level), 400);
+      }
+    });
+
+    return flyout;
+  }
+
+  function buildCatRow(cat, library, level) {
+    const hasChildren = (cat.children && cat.children.length > 0);
+    const hasImages = (cat.images && cat.images.length > 0);
+    const hasContent = hasChildren || hasImages;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text);';
+    row.addEventListener('mouseenter', () => {
+      row.style.background = 'var(--surface2)';
+      if (!hasContent) return;
+      // Annuler fermetures en cours
+      activeFlyoutChain.forEach(entry => {
+        if (entry.closeTimeout) { clearTimeout(entry.closeTimeout); entry.closeTimeout = null; }
+      });
+      // Fermer les flyouts de niveaux >= level
+      closeFlyoutsFrom(level);
+      // Ouvrir le nouveau flyout
+      const flyout = buildFlyoutContent(cat, library, level);
+      const rect = row.getBoundingClientRect();
+      flyout.style.left = (rect.right - 2) + 'px';
+      flyout.style.top = (rect.top - 4) + 'px';
+      document.body.appendChild(flyout);
+      // Ajuster position si hors écran
+      requestAnimationFrame(() => {
+        const fr = flyout.getBoundingClientRect();
+        if (fr.right > window.innerWidth - 10) flyout.style.left = (rect.left - fr.width + 2) + 'px';
+        if (fr.bottom > window.innerHeight - 10) flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
+      });
+      activeFlyoutChain[level] = { flyout, closeTimeout: null };
+    });
+    row.addEventListener('mouseleave', () => {
+      row.style.background = 'none';
+      if (!hasContent) return;
+      const entry = activeFlyoutChain[level];
+      if (entry) {
+        entry.closeTimeout = setTimeout(() => closeFlyoutsFrom(level), 400);
+      }
+    });
+
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    label.textContent = cat.nom;
+    row.appendChild(label);
+
+    if (hasContent) {
+      const arrow = document.createElement('span');
+      arrow.style.cssText = 'font-size:8px;color:var(--muted);flex-shrink:0;';
+      arrow.textContent = '▶';
+      row.appendChild(arrow);
+    }
+
+    return row;
+  }
+
   function createCategoryItem(cat, library, rootContainer) {
     const hasChildren = (cat.children && cat.children.length > 0);
     const hasImages = (cat.images && cat.images.length > 0);
     const hasContent = hasChildren || hasImages;
 
     const item = document.createElement('div');
-    item.style.cssText = 'position:relative;';
 
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:var(--mono);font-size:10px;color:var(--text);';
-    row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
-    row.addEventListener('mouseleave', () => row.style.background = 'none');
+    row.addEventListener('mouseenter', () => {
+      row.style.background = 'var(--surface2)';
+      if (!hasContent) return;
+      // Annuler toutes les fermetures
+      activeFlyoutChain.forEach(entry => {
+        if (entry.closeTimeout) { clearTimeout(entry.closeTimeout); entry.closeTimeout = null; }
+      });
+      // Fermer tous les flyouts existants
+      closeAllFlyouts();
+      // Ouvrir le flyout de niveau 0
+      const flyout = buildFlyoutContent(cat, library, 0);
+      const rect = row.getBoundingClientRect();
+      flyout.style.left = (rect.right - 2) + 'px';
+      flyout.style.top = (rect.top - 4) + 'px';
+      document.body.appendChild(flyout);
+      requestAnimationFrame(() => {
+        const fr = flyout.getBoundingClientRect();
+        if (fr.right > window.innerWidth - 10) flyout.style.left = (rect.left - fr.width + 2) + 'px';
+        if (fr.bottom > window.innerHeight - 10) flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
+      });
+      activeFlyoutChain[0] = { flyout, closeTimeout: null };
+    });
+    row.addEventListener('mouseleave', () => {
+      row.style.background = 'none';
+      if (!hasContent) return;
+      const entry = activeFlyoutChain[0];
+      if (entry) {
+        entry.closeTimeout = setTimeout(() => closeAllFlyouts(), 400);
+      }
+    });
 
     const label = document.createElement('span');
     label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
@@ -1536,230 +1705,6 @@ const Annotations = (() => {
     }
 
     item.appendChild(row);
-
-    // Flyout au survol
-    if (hasContent) {
-      let flyout = null;
-      let closeTimeout = null;
-
-      function openFlyout() {
-        if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
-        if (flyout) return;
-
-        // Fermer les autres flyouts au même niveau
-        rootContainer.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
-
-        flyout = document.createElement('div');
-        flyout.className = 'sticker-flyout';
-        flyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:350;min-width:180px;max-height:320px;overflow-y:auto;padding:4px 0;';
-
-        // Positionner à droite de l'item
-        const rect = row.getBoundingClientRect();
-        flyout.style.left = (rect.right) + 'px';
-        flyout.style.top = (rect.top - 4) + 'px';
-        flyout.style.paddingLeft = '4px';
-
-        // Vérifier que ça ne sort pas de l'écran à droite
-        setTimeout(() => {
-          if (!flyout) return;
-          const fr = flyout.getBoundingClientRect();
-          if (fr.right > window.innerWidth - 10) {
-            flyout.style.left = (rect.left - fr.width - 4) + 'px';
-          }
-          if (fr.bottom > window.innerHeight - 10) {
-            flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
-          }
-        }, 0);
-
-        // Sous-catégories
-        if (hasChildren) {
-          cat.children.forEach(child => {
-            const subItem = createFlyoutCategoryItem(child, library, flyout);
-            flyout.appendChild(subItem);
-          });
-        }
-
-        // Séparateur si les deux
-        if (hasChildren && hasImages) {
-          const sep = document.createElement('div');
-          sep.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;';
-          flyout.appendChild(sep);
-        }
-
-        // Images
-        if (hasImages) {
-          const imgGrid = document.createElement('div');
-          imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 8px;';
-          cat.images.forEach(imgName => {
-            const img = library.find(i => i.name === imgName);
-            if (!img) return;
-            const card = document.createElement('div');
-            card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
-            card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
-            card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
-
-            const imgEl = document.createElement('img');
-            imgEl.src = img.dataUrl;
-            imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
-            card.appendChild(imgEl);
-
-            const name = document.createElement('span');
-            name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
-            name.textContent = img.name;
-            card.appendChild(name);
-
-            card.addEventListener('click', () => {
-              closeFlyout();
-              setActiveTool('image-library');
-              pendingImageSrc = img.dataUrl;
-              pendingImageLabel = img.name;
-              document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-              showStatusMessage('Cliquez sur le schéma pour placer "' + img.name + '"');
-            });
-
-            imgGrid.appendChild(card);
-          });
-          flyout.appendChild(imgGrid);
-        }
-
-        flyout.addEventListener('mouseenter', () => {
-          if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
-        });
-        flyout.addEventListener('mouseleave', () => {
-          closeTimeout = setTimeout(closeFlyout, 500);
-        });
-
-        document.body.appendChild(flyout);
-      }
-
-      function closeFlyout() {
-        if (flyout) { flyout.remove(); flyout = null; }
-        // Fermer les sous-flyouts aussi
-        document.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
-      }
-
-      row.addEventListener('mouseenter', openFlyout);
-      row.addEventListener('mouseleave', () => {
-        closeTimeout = setTimeout(closeFlyout, 500);
-      });
-    }
-
-    return item;
-  }
-
-  function createFlyoutCategoryItem(cat, library, parentFlyout) {
-    const hasChildren = (cat.children && cat.children.length > 0);
-    const hasImages = (cat.images && cat.images.length > 0);
-    const hasContent = hasChildren || hasImages;
-
-    const item = document.createElement('div');
-    item.style.cssText = 'position:relative;';
-
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text);';
-    row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
-    row.addEventListener('mouseleave', () => row.style.background = 'none');
-
-    const label = document.createElement('span');
-    label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    label.textContent = cat.nom;
-    row.appendChild(label);
-
-    if (hasContent) {
-      const arrow = document.createElement('span');
-      arrow.style.cssText = 'font-size:8px;color:var(--muted);flex-shrink:0;';
-      arrow.textContent = '▶';
-      row.appendChild(arrow);
-    }
-
-    item.appendChild(row);
-
-    if (hasContent) {
-      let subFlyout = null;
-      let closeTimeout = null;
-
-      function openSubFlyout() {
-        if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
-        if (subFlyout) return;
-
-        subFlyout = document.createElement('div');
-        subFlyout.className = 'sticker-flyout';
-        subFlyout.style.cssText = 'position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:351;min-width:180px;max-height:320px;overflow-y:auto;padding:4px 0;';
-
-        const rect = row.getBoundingClientRect();
-        subFlyout.style.left = (rect.right) + 'px';
-        subFlyout.style.top = (rect.top - 4) + 'px';
-        subFlyout.style.paddingLeft = '4px';
-
-        setTimeout(() => {
-          if (!subFlyout) return;
-          const fr = subFlyout.getBoundingClientRect();
-          if (fr.right > window.innerWidth - 10) {
-            subFlyout.style.left = (rect.left - fr.width - 4) + 'px';
-          }
-          if (fr.bottom > window.innerHeight - 10) {
-            subFlyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
-          }
-        }, 0);
-
-        if (hasChildren) {
-          cat.children.forEach(child => {
-            const sub = createFlyoutCategoryItem(child, library, subFlyout);
-            subFlyout.appendChild(sub);
-          });
-        }
-        if (hasChildren && hasImages) {
-          const sep = document.createElement('div');
-          sep.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;';
-          subFlyout.appendChild(sep);
-        }
-        if (hasImages) {
-          const imgGrid = document.createElement('div');
-          imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 8px;';
-          cat.images.forEach(imgName => {
-            const img = library.find(i => i.name === imgName);
-            if (!img) return;
-            const card = document.createElement('div');
-            card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
-            card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
-            card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
-            const imgEl = document.createElement('img');
-            imgEl.src = img.dataUrl;
-            imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
-            card.appendChild(imgEl);
-            const name = document.createElement('span');
-            name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
-            name.textContent = img.name;
-            card.appendChild(name);
-            card.addEventListener('click', () => {
-              document.querySelectorAll('.sticker-flyout').forEach(f => f.remove());
-              setActiveTool('image-library');
-              pendingImageSrc = img.dataUrl;
-              pendingImageLabel = img.name;
-              document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-              showStatusMessage('Cliquez sur le schéma pour placer "' + img.name + '"');
-            });
-            imgGrid.appendChild(card);
-          });
-          subFlyout.appendChild(imgGrid);
-        }
-
-        subFlyout.addEventListener('mouseenter', () => {
-          if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
-        });
-        subFlyout.addEventListener('mouseleave', () => {
-          closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 500);
-        });
-
-        document.body.appendChild(subFlyout);
-      }
-
-      row.addEventListener('mouseenter', openSubFlyout);
-      row.addEventListener('mouseleave', () => {
-        closeTimeout = setTimeout(() => { if (subFlyout) { subFlyout.remove(); subFlyout = null; } }, 500);
-      });
-    }
-
     return item;
   }
 
