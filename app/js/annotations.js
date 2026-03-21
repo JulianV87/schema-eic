@@ -204,6 +204,35 @@ const Annotations = (() => {
         const text = prompt('Texte :');
         if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
       }
+      // Annotations custom (symbole/point ou ligne)
+      else if (activeTool && activeTool.startsWith('custom-')) {
+        const idx = parseInt(activeTool.replace('custom-', ''), 10);
+        const custom = customAnnotations[idx];
+        if (!custom) return;
+
+        if (custom.placement === 'line') {
+          if (!pendingFirstPoint) {
+            pendingFirstPoint = { x: viewportPoint.x, y: viewportPoint.y };
+            showStatusMessage('Cliquez le 2ème point');
+          } else {
+            addLineAnnotation(activeTool, pendingFirstPoint.x, pendingFirstPoint.y, viewportPoint.x, viewportPoint.y);
+            const lastAnnot = annotations[annotations.length - 1];
+            lastAnnot.label = custom.name;
+            lastAnnot.color = custom.color;
+            lastAnnot.symbol = custom.symbol;
+            pendingFirstPoint = null;
+            hideStatusMessage();
+            redraw();
+          }
+        } else {
+          addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, custom.name);
+          const lastAnnot = annotations[annotations.length - 1];
+          lastAnnot.symbol = custom.symbol;
+          lastAnnot.color = custom.color;
+          lastAnnot.label = custom.name;
+          redraw();
+        }
+      }
     });
 
     // Dessin libre — mouse events sur le canvas d'annotations
@@ -612,14 +641,14 @@ const Annotations = (() => {
       { label: 'Voie libérée (2 pts)', icon: '━', color: '#00d4a0', tool: 'voie-libre' },
       { label: 'Caténaire (2 pts)', icon: '━', color: '#3080ff', tool: 'catenaire' },
       { label: 'Texte libre', icon: 'T', color: '#c8daf5', tool: 'text' },
-      { label: 'Image...', icon: '🖼', color: '#c8daf5', tool: 'image-library-menu' },
+      { label: 'Image / Custom...', icon: '🖼', color: '#c8daf5', tool: 'open-manager' },
     ];
 
     addOptions.forEach(opt => {
       const item = createMenuItem(opt.icon, opt.label, opt.color, () => {
         closeContextMenu();
-        if (opt.tool === 'image-library-menu') {
-          showImageLibrary();
+        if (opt.tool === 'open-manager') {
+          showAnnotationManager();
         } else if (TRAIN_SYMBOLS[opt.tool]) {
           promptTrainNumber((num) => {
             addTrainAnnotation(opt.tool, viewportPoint.x, viewportPoint.y, num);
@@ -1441,9 +1470,10 @@ const Annotations = (() => {
 
   function getAnnotations() { return annotations; }
 
-  // === BIBLIOTHÈQUE D'IMAGES ===
+  // === GESTION DES ANNOTATIONS ===
 
   let imageLibrary = []; // { name, dataUrl }
+  let customAnnotations = []; // { name, symbol, color, placement, imageDataUrl, pinned }
 
   function loadImageLibrary() {
     try {
@@ -1451,146 +1481,543 @@ const Annotations = (() => {
       if (saved) imageLibrary = saved;
     } catch {}
   }
-
   function saveImageLibrary() {
+    try { Store.set('eic_image_library', imageLibrary); } catch {}
+  }
+  function loadCustomAnnotations() {
     try {
-      Store.set('eic_image_library', imageLibrary);
+      const saved = Store.getJSON('eic_custom_annotations', null);
+      if (saved) customAnnotations = saved;
     } catch {}
   }
+  function saveCustomAnnotations() {
+    try { Store.set('eic_custom_annotations', customAnnotations); } catch {}
+  }
 
-  // Images par défaut depuis le dossier img/
   const DEFAULT_IMAGES = [
     '3058_00_nobg.png', 'agc_hdf_nobg.png', 'machinefret_nobg.png',
     'silhouette_black_only.png', 'tgv_euroduplex_nobg.png',
     'thalys_nobg.png', 'train_nobg.png', 'wagons_roco_nobg.png',
   ];
 
-  function setupImageLibrary() {
+  function setupAnnotationManager() {
     loadImageLibrary();
-    const btn = document.getElementById('btn-image-library');
-    if (btn) btn.addEventListener('click', showImageLibrary);
+    loadCustomAnnotations();
+    renderPinnedAnnotations();
+    const btn = document.getElementById('btn-manage-annotations');
+    if (btn) btn.addEventListener('click', showAnnotationManager);
   }
 
-  function showImageLibrary() {
-    const old = document.getElementById('image-library-modal');
+  // === ANNOTATIONS ÉPINGLÉES DANS LA SIDEBAR ===
+
+  function renderPinnedAnnotations() {
+    const container = document.getElementById('pinned-annotations');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const pinned = customAnnotations.filter(c => c.pinned);
+    if (pinned.length === 0) return;
+
+    pinned.forEach((custom, _) => {
+      const globalIndex = customAnnotations.indexOf(custom);
+      const btn = document.createElement('div');
+      btn.className = 'custom-tool-btn';
+      btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;';
+      btn.addEventListener('mouseenter', () => btn.style.background = 'var(--surface2)');
+      btn.addEventListener('mouseleave', () => { if (!btn.classList.contains('active')) btn.style.background = 'none'; });
+
+      const iconEl = document.createElement('span');
+      iconEl.style.cssText = 'font-size:14px;flex-shrink:0;width:20px;text-align:center;';
+      if (custom.imageDataUrl) {
+        iconEl.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:16px;max-width:24px;vertical-align:middle;">';
+      } else if (custom.imageSrc) {
+        iconEl.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:16px;max-width:24px;vertical-align:middle;">';
+      } else {
+        iconEl.textContent = custom.symbol;
+        iconEl.style.color = custom.color;
+      }
+      btn.appendChild(iconEl);
+
+      const labelEl = document.createElement('span');
+      labelEl.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      labelEl.textContent = custom.name;
+      btn.appendChild(labelEl);
+
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tool-btn, .custom-tool-btn').forEach(b => { b.classList.remove('active'); b.style.background = ''; });
+        const isActive = btn.classList.contains('active');
+        if (isActive) {
+          btn.classList.remove('active');
+          btn.style.background = '';
+          setActiveTool(null);
+        } else {
+          btn.classList.add('active');
+          btn.style.background = 'var(--surface2)';
+          if (custom.imageDataUrl || custom.imageSrc) {
+            setActiveTool('image-library');
+            pendingImageSrc = custom.imageDataUrl || custom.imageSrc;
+            pendingImageLabel = custom.name;
+          } else if (custom.placement === 'line') {
+            setActiveTool('custom-' + globalIndex);
+          } else {
+            setActiveTool('custom-' + globalIndex);
+          }
+          showStatusMessage('Cliquez sur le schéma pour placer "' + custom.name + '"');
+        }
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  // === PANNEAU DE GESTION ===
+
+  function showAnnotationManager() {
+    const old = document.getElementById('annotation-manager-modal');
     if (old) old.remove();
 
     const overlay = document.createElement('div');
-    overlay.id = 'image-library-modal';
+    overlay.id = 'annotation-manager-modal';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
 
     const panel = document.createElement('div');
-    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+    panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:520px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
 
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
     const title = document.createElement('span');
     title.style.cssText = 'font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);';
-    title.textContent = 'Bibliothèque d\'images';
+    title.textContent = 'Gérer les annotations';
     header.appendChild(title);
-
-    const headerBtns = document.createElement('div');
-    headerBtns.style.cssText = 'display:flex;gap:6px;align-items:center;';
-
-    // Bouton upload
-    const uploadBtn = document.createElement('button');
-    uploadBtn.style.cssText = 'padding:4px 10px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
-    uploadBtn.textContent = '+ Ajouter';
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    fileInput.multiple = true;
-    fileInput.style.display = 'none';
-    uploadBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
-      Array.from(fileInput.files).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const name = file.name.replace(/\.[^.]+$/, '');
-          imageLibrary.push({ name, dataUrl: ev.target.result });
-          saveImageLibrary();
-          renderGrid();
-        };
-        reader.readAsDataURL(file);
-      });
-      fileInput.value = '';
-    });
-    headerBtns.appendChild(uploadBtn);
-    headerBtns.appendChild(fileInput);
-
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;';
     closeBtn.textContent = '✕';
     closeBtn.addEventListener('click', () => overlay.remove());
-    headerBtns.appendChild(closeBtn);
-    header.appendChild(headerBtns);
+    header.appendChild(closeBtn);
     panel.appendChild(header);
 
-    // Info
-    const info = document.createElement('div');
-    info.style.cssText = 'padding:4px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);';
-    info.textContent = 'Cliquez sur une image pour l\'utiliser comme annotation. Clic droit pour supprimer.';
-    panel.appendChild(info);
+    // Onglets
+    const tabBar = document.createElement('div');
+    tabBar.style.cssText = 'display:flex;border-bottom:1px solid var(--border);';
+    let activeManagerTab = 'annotations';
 
-    // Grille d'images
-    const gridDiv = document.createElement('div');
-    gridDiv.style.cssText = 'overflow-y:auto;flex:1;padding:10px 14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;';
-    panel.appendChild(gridDiv);
-
-    function renderGrid() {
-      gridDiv.innerHTML = '';
-
-      // Images par défaut (dossier img/)
-      DEFAULT_IMAGES.forEach(filename => {
-        const card = createImageCard('img/' + filename, filename.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true);
-        gridDiv.appendChild(card);
+    function createTab(id, label) {
+      const tab = document.createElement('button');
+      tab.style.cssText = 'flex:1;padding:8px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;';
+      tab.textContent = label;
+      tab.addEventListener('click', () => {
+        activeManagerTab = id;
+        tabBar.querySelectorAll('button').forEach(b => { b.style.borderBottomColor = 'transparent'; b.style.color = 'var(--muted)'; });
+        tab.style.borderBottomColor = 'var(--accent2)';
+        tab.style.color = 'var(--text)';
+        renderContent();
       });
+      if (id === activeManagerTab) {
+        tab.style.borderBottomColor = 'var(--accent2)';
+        tab.style.color = 'var(--text)';
+      }
+      return tab;
+    }
+    tabBar.appendChild(createTab('annotations', 'Annotations'));
+    tabBar.appendChild(createTab('images', 'Bibliothèque d\'images'));
+    panel.appendChild(tabBar);
 
-      // Images uploadées
-      imageLibrary.forEach((img, index) => {
-        const card = createImageCard(img.dataUrl, img.name, false, index);
-        gridDiv.appendChild(card);
+    // Contenu
+    const contentDiv = document.createElement('div');
+    contentDiv.style.cssText = 'overflow-y:auto;flex:1;';
+    panel.appendChild(contentDiv);
+
+    function renderContent() {
+      contentDiv.innerHTML = '';
+      if (activeManagerTab === 'annotations') renderAnnotationsTab();
+      else renderImagesTab();
+    }
+
+    // === ONGLET ANNOTATIONS ===
+    function renderAnnotationsTab() {
+      // Bouton créer
+      const addRow = document.createElement('div');
+      addRow.style.cssText = 'padding:8px 14px;';
+      const addBtn = document.createElement('button');
+      addBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      addBtn.textContent = '+ Créer une annotation';
+      addBtn.addEventListener('click', () => showCreateAnnotationForm(contentDiv, renderAnnotationsTab));
+      addRow.appendChild(addBtn);
+      contentDiv.appendChild(addRow);
+
+      if (customAnnotations.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:20px 14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
+        empty.textContent = 'Aucune annotation personnalisée';
+        contentDiv.appendChild(empty);
+        return;
+      }
+
+      customAnnotations.forEach((custom, index) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border);';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+        // Icône
+        const icon = document.createElement('span');
+        icon.style.cssText = 'font-size:16px;width:24px;text-align:center;flex-shrink:0;';
+        if (custom.imageDataUrl) {
+          icon.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:20px;max-width:28px;">';
+        } else if (custom.imageSrc) {
+          icon.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:20px;max-width:28px;">';
+        } else {
+          icon.textContent = custom.symbol;
+          icon.style.color = custom.color;
+        }
+        row.appendChild(icon);
+
+        // Nom
+        const name = document.createElement('span');
+        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.textContent = custom.name;
+        row.appendChild(name);
+
+        // Type
+        const typeBadge = document.createElement('span');
+        typeBadge.style.cssText = 'font-family:var(--mono);font-size:8px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
+        typeBadge.textContent = custom.placement === 'image' ? 'image' : custom.placement === 'line' ? 'ligne' : 'point';
+        row.appendChild(typeBadge);
+
+        // Bouton épingler
+        const pinBtn = document.createElement('button');
+        pinBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0;';
+        pinBtn.textContent = custom.pinned ? '📌' : '📍';
+        pinBtn.title = custom.pinned ? 'Désépingler de la sidebar' : 'Épingler dans la sidebar';
+        pinBtn.style.opacity = custom.pinned ? '1' : '0.4';
+        pinBtn.addEventListener('click', () => {
+          custom.pinned = !custom.pinned;
+          saveCustomAnnotations();
+          renderPinnedAnnotations();
+          renderAnnotationsTab();
+        });
+        row.appendChild(pinBtn);
+
+        // Bouton supprimer
+        const delBtn = document.createElement('button');
+        delBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:11px;color:var(--muted);padding:2px 4px;flex-shrink:0;';
+        delBtn.textContent = '✕';
+        delBtn.title = 'Supprimer';
+        delBtn.addEventListener('click', () => {
+          if (confirm('Supprimer "' + custom.name + '" ?')) {
+            customAnnotations.splice(index, 1);
+            saveCustomAnnotations();
+            renderPinnedAnnotations();
+            renderAnnotationsTab();
+          }
+        });
+        row.appendChild(delBtn);
+
+        contentDiv.appendChild(row);
       });
     }
 
-    function createImageCard(src, name, isDefault, libraryIndex) {
+    // === FORMULAIRE CRÉER ANNOTATION ===
+    function showCreateAnnotationForm(container, onDone) {
+      container.innerHTML = '';
+
+      const form = document.createElement('div');
+      form.style.cssText = 'padding:10px 14px;';
+
+      // Nom
+      const nameLabel = document.createElement('div');
+      nameLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px;';
+      nameLabel.textContent = 'Nom';
+      form.appendChild(nameLabel);
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Ex: Machine de secours';
+      nameInput.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;margin-bottom:10px;';
+      form.appendChild(nameInput);
+
+      // Source : symbole ou image
+      const srcLabel = document.createElement('div');
+      srcLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px;';
+      srcLabel.textContent = 'Type';
+      form.appendChild(srcLabel);
+
+      const srcRow = document.createElement('div');
+      srcRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+      let srcType = 'symbol';
+
+      const symBtn = document.createElement('button');
+      symBtn.style.cssText = 'flex:1;padding:5px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      symBtn.textContent = 'Symbole';
+      const imgBtn = document.createElement('button');
+      imgBtn.style.cssText = 'flex:1;padding:5px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      imgBtn.textContent = 'Image';
+
+      function setSrcType(type) {
+        srcType = type;
+        if (type === 'symbol') {
+          symBtn.style.background = 'var(--accent2)'; symBtn.style.color = 'var(--bg)'; symBtn.style.border = 'none';
+          imgBtn.style.background = 'var(--surface2)'; imgBtn.style.color = 'var(--text)'; imgBtn.style.border = '1px solid var(--border)';
+          symbolSection.style.display = '';
+          imageSection.style.display = 'none';
+        } else {
+          imgBtn.style.background = 'var(--accent2)'; imgBtn.style.color = 'var(--bg)'; imgBtn.style.border = 'none';
+          symBtn.style.background = 'var(--surface2)'; symBtn.style.color = 'var(--text)'; symBtn.style.border = '1px solid var(--border)';
+          symbolSection.style.display = 'none';
+          imageSection.style.display = '';
+        }
+      }
+      symBtn.addEventListener('click', () => setSrcType('symbol'));
+      imgBtn.addEventListener('click', () => setSrcType('image'));
+      srcRow.appendChild(symBtn);
+      srcRow.appendChild(imgBtn);
+      form.appendChild(srcRow);
+
+      // Section symbole
+      const symbolSection = document.createElement('div');
+      const symbols = ['●', '✕', '⏸', '◆', '▲', '⚠', '■', '★', '◈', '⬥', '━', '⊘'];
+      let selectedSymbol = '●';
+      let selectedColor = '#ff4040';
+
+      const symGrid = document.createElement('div');
+      symGrid.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;';
+      symbols.forEach(s => {
+        const b = document.createElement('button');
+        b.style.cssText = 'width:28px;height:28px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;';
+        b.textContent = s;
+        if (s === selectedSymbol) b.style.borderColor = 'var(--accent2)';
+        b.addEventListener('click', () => {
+          selectedSymbol = s;
+          symGrid.querySelectorAll('button').forEach(bb => bb.style.borderColor = 'var(--border)');
+          b.style.borderColor = 'var(--accent2)';
+        });
+        symGrid.appendChild(b);
+      });
+      symbolSection.appendChild(symGrid);
+
+      // Couleurs
+      const colors = ['#ff4040', '#ff9520', '#00d4a0', '#3080ff', '#9060ff', '#ff69b4', '#ffcc00', '#ffffff'];
+      const colorGrid = document.createElement('div');
+      colorGrid.style.cssText = 'display:flex;gap:4px;margin-bottom:8px;';
+      colors.forEach(c => {
+        const b = document.createElement('button');
+        b.style.cssText = 'width:22px;height:22px;border-radius:50%;border:2px solid var(--border);cursor:pointer;background:' + c + ';';
+        if (c === selectedColor) b.style.borderColor = 'var(--text)';
+        b.addEventListener('click', () => {
+          selectedColor = c;
+          colorGrid.querySelectorAll('button').forEach(bb => bb.style.borderColor = 'var(--border)');
+          b.style.borderColor = 'var(--text)';
+        });
+        colorGrid.appendChild(b);
+      });
+      symbolSection.appendChild(colorGrid);
+
+      // Placement
+      const placementLabel = document.createElement('div');
+      placementLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px;';
+      placementLabel.textContent = 'Placement';
+      symbolSection.appendChild(placementLabel);
+      let selectedPlacement = 'point';
+      const placementRow = document.createElement('div');
+      placementRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+      [['point', 'Point'], ['line', 'Ligne (2 clics)']].forEach(([val, lab]) => {
+        const b = document.createElement('button');
+        b.style.cssText = 'flex:1;padding:4px;background:' + (val === 'point' ? 'var(--accent2)' : 'var(--surface2)') + ';border:1px solid var(--border);border-radius:3px;color:' + (val === 'point' ? 'var(--bg)' : 'var(--text)') + ';font-family:var(--mono);font-size:10px;cursor:pointer;';
+        b.textContent = lab;
+        b.addEventListener('click', () => {
+          selectedPlacement = val;
+          placementRow.querySelectorAll('button').forEach(bb => { bb.style.background = 'var(--surface2)'; bb.style.color = 'var(--text)'; });
+          b.style.background = 'var(--accent2)'; b.style.color = 'var(--bg)';
+        });
+        placementRow.appendChild(b);
+      });
+      symbolSection.appendChild(placementRow);
+      form.appendChild(symbolSection);
+
+      // Section image
+      const imageSection = document.createElement('div');
+      imageSection.style.display = 'none';
+
+      // Sélection depuis la bibliothèque
+      const imgLabel = document.createElement('div');
+      imgLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:5px;';
+      imgLabel.textContent = 'Choisir une image';
+      imageSection.appendChild(imgLabel);
+
+      let selectedImgSrc = null;
+      const imgGrid = document.createElement('div');
+      imgGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:8px;max-height:120px;overflow-y:auto;';
+
+      function renderImgOptions() {
+        imgGrid.innerHTML = '';
+        const allImgs = [
+          ...DEFAULT_IMAGES.map(f => ({ src: 'img/' + f, name: f.replace(/_nobg|\.png/g, '').replace(/_/g, ' ') })),
+          ...imageLibrary.map(i => ({ src: i.dataUrl, name: i.name })),
+        ];
+        allImgs.forEach(img => {
+          const card = document.createElement('div');
+          card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;height:40px;';
+          const imgEl = document.createElement('img');
+          imgEl.src = img.src;
+          imgEl.style.cssText = 'max-height:34px;max-width:100%;object-fit:contain;';
+          imgEl.title = img.name;
+          card.appendChild(imgEl);
+          card.addEventListener('click', () => {
+            selectedImgSrc = img.src;
+            imgGrid.querySelectorAll('div').forEach(d => d.style.borderColor = 'var(--border)');
+            card.style.borderColor = 'var(--accent2)';
+            if (!nameInput.value) nameInput.value = img.name;
+          });
+          imgGrid.appendChild(card);
+        });
+      }
+      renderImgOptions();
+      imageSection.appendChild(imgGrid);
+
+      // Ou uploader
+      const orLabel = document.createElement('div');
+      orLabel.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-align:center;margin:4px 0;';
+      orLabel.textContent = 'ou uploader une nouvelle image';
+      imageSection.appendChild(orLabel);
+      const uploadRow = document.createElement('div');
+      uploadRow.style.cssText = 'margin-bottom:10px;';
+      const fileIn = document.createElement('input');
+      fileIn.type = 'file'; fileIn.accept = 'image/*';
+      fileIn.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--text);';
+      fileIn.addEventListener('change', () => {
+        const file = fileIn.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          selectedImgSrc = ev.target.result;
+          if (!nameInput.value) nameInput.value = file.name.replace(/\.[^.]+$/, '');
+        };
+        reader.readAsDataURL(file);
+      });
+      uploadRow.appendChild(fileIn);
+      imageSection.appendChild(uploadRow);
+      form.appendChild(imageSection);
+
+      // Boutons
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:6px;padding-top:6px;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.style.cssText = 'flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      cancelBtn.textContent = 'Annuler';
+      cancelBtn.addEventListener('click', onDone);
+      btnRow.appendChild(cancelBtn);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.style.cssText = 'flex:1;padding:6px;background:var(--accent2);border:none;border-radius:3px;color:var(--bg);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;';
+      saveBtn.textContent = 'Créer';
+      saveBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+
+        const def = { name, pinned: false };
+        if (srcType === 'image' && selectedImgSrc) {
+          def.placement = 'image';
+          // Si c'est un dataUrl, stocker inline. Sinon c'est un chemin local.
+          if (selectedImgSrc.startsWith('data:')) {
+            def.imageDataUrl = selectedImgSrc;
+          } else {
+            def.imageSrc = selectedImgSrc;
+          }
+          def.symbol = '🖼'; def.color = '#c8daf5';
+        } else {
+          def.symbol = selectedSymbol;
+          def.color = selectedColor;
+          def.placement = selectedPlacement;
+        }
+
+        customAnnotations.push(def);
+        saveCustomAnnotations();
+        renderPinnedAnnotations();
+        onDone();
+      });
+      btnRow.appendChild(saveBtn);
+      form.appendChild(btnRow);
+
+      container.appendChild(form);
+      nameInput.focus();
+    }
+
+    // === ONGLET IMAGES ===
+    function renderImagesTab() {
+      // Upload
+      const uploadRow = document.createElement('div');
+      uploadRow.style.cssText = 'padding:8px 14px;';
+      const uploadBtn = document.createElement('button');
+      uploadBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;';
+      uploadBtn.textContent = '+ Ajouter des images';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.multiple = true; fileInput.style.display = 'none';
+      uploadBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+        Array.from(fileInput.files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            imageLibrary.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: ev.target.result });
+            saveImageLibrary();
+            renderImagesTab();
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+      uploadRow.appendChild(uploadBtn);
+      uploadRow.appendChild(fileInput);
+      contentDiv.appendChild(uploadRow);
+
+      // Grille
+      const gridDiv = document.createElement('div');
+      gridDiv.style.cssText = 'padding:6px 14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;';
+      contentDiv.appendChild(gridDiv);
+
+      // Images par défaut
+      const defLabel = document.createElement('div');
+      defLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;padding-top:4px;';
+      defLabel.textContent = 'Images par défaut';
+      gridDiv.appendChild(defLabel);
+      DEFAULT_IMAGES.forEach(f => {
+        gridDiv.appendChild(createImgCard('img/' + f, f.replace(/_nobg|\.png/g, '').replace(/_/g, ' '), true));
+      });
+
+      // Images uploadées
+      if (imageLibrary.length > 0) {
+        const uplLabel = document.createElement('div');
+        uplLabel.style.cssText = 'grid-column:1/-1;font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;padding-top:8px;';
+        uplLabel.textContent = 'Images uploadées';
+        gridDiv.appendChild(uplLabel);
+        imageLibrary.forEach((img, i) => {
+          gridDiv.appendChild(createImgCard(img.dataUrl, img.name, false, i));
+        });
+      }
+    }
+
+    function createImgCard(src, name, isDefault, libIndex) {
       const card = document.createElement('div');
-      card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color 0.15s;';
-      card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
-      card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+      card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;';
 
       const img = document.createElement('img');
       img.src = src;
-      img.style.cssText = 'max-height:50px;max-width:100%;object-fit:contain;';
-      img.alt = name;
+      img.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
       card.appendChild(img);
 
       const label = document.createElement('span');
-      label.style.cssText = 'font-family:var(--mono);font-size:8px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+      label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
       label.textContent = name;
       card.appendChild(label);
 
-      // Clic gauche → sélectionner comme outil d'annotation
-      card.addEventListener('click', () => {
-        overlay.remove();
-        setActiveTool('image-library');
-        pendingImageSrc = src;
-        pendingImageLabel = name;
-        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-        showStatusMessage('Cliquez sur le schéma pour placer "' + name + '"');
-      });
-
-      // Clic droit → supprimer (seulement les images uploadées)
       if (!isDefault) {
-        card.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          if (confirm('Supprimer "' + name + '" de la bibliothèque ?')) {
-            imageLibrary.splice(libraryIndex, 1);
-            saveImageLibrary();
-            renderGrid();
-          }
+        const del = document.createElement('button');
+        del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:10px;cursor:pointer;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
+        del.textContent = '✕';
+        del.addEventListener('click', () => {
+          imageLibrary.splice(libIndex, 1);
+          saveImageLibrary();
+          renderImagesTab();
         });
+        card.appendChild(del);
       }
 
       return card;
@@ -1598,7 +2025,7 @@ const Annotations = (() => {
 
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
-    renderGrid();
+    renderContent();
   }
 
   // Image en attente de placement
@@ -1758,7 +2185,7 @@ const Annotations = (() => {
     redo,
     setupLegend,
     refreshLegend,
-    setupImageLibrary,
+    setupAnnotationManager,
     getActiveTool,
   };
 })();
