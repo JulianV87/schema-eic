@@ -2057,7 +2057,7 @@ const Settings = (() => {
       overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:400;display:flex;align-items:center;justify-content:center;';
 
       const panel = document.createElement('div');
-      panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:420px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+      panel.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
 
       // Header
       const header = document.createElement('div');
@@ -2073,39 +2073,84 @@ const Settings = (() => {
       header.appendChild(closeBtn);
       panel.appendChild(header);
 
+      // Filtre
+      const filterRow = document.createElement('div');
+      filterRow.style.cssText = 'padding:6px 14px;display:flex;gap:4px;';
+      let activeFilter = 'all';
+
+      function createFilterBtn(id, label) {
+        const btn = document.createElement('button');
+        btn.style.cssText = 'flex:1;padding:4px;border-radius:3px;font-family:var(--mono);font-size:9px;cursor:pointer;border:1px solid var(--border);';
+        btn.textContent = label;
+        function applyStyle() {
+          if (activeFilter === id) {
+            btn.style.background = 'var(--accent2)'; btn.style.color = 'var(--bg)'; btn.style.borderColor = 'var(--accent2)';
+          } else {
+            btn.style.background = 'var(--surface2)'; btn.style.color = 'var(--text)'; btn.style.borderColor = 'var(--border)';
+          }
+        }
+        applyStyle();
+        btn.addEventListener('click', () => {
+          activeFilter = id;
+          filterRow.querySelectorAll('button').forEach(() => {});
+          renderGrid();
+          filterRow.querySelectorAll('button').forEach(b => {
+            const bId = b.dataset.filterId;
+            if (activeFilter === bId) {
+              b.style.background = 'var(--accent2)'; b.style.color = 'var(--bg)'; b.style.borderColor = 'var(--accent2)';
+            } else {
+              b.style.background = 'var(--surface2)'; b.style.color = 'var(--text)'; b.style.borderColor = 'var(--border)';
+            }
+          });
+        });
+        btn.dataset.filterId = id;
+        return btn;
+      }
+      filterRow.appendChild(createFilterBtn('all', 'Tout'));
+      filterRow.appendChild(createFilterBtn('missing', 'Manquants'));
+      filterRow.appendChild(createFilterBtn('present', 'Présents'));
+      panel.appendChild(filterRow);
+
       // Grille avec cases à cocher
       const gridDiv = document.createElement('div');
-      gridDiv.style.cssText = 'overflow-y:auto;flex:1;padding:10px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;';
+      gridDiv.style.cssText = 'overflow-y:auto;flex:1;padding:10px 14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;';
 
-      library.forEach(img => {
-        const card = document.createElement('label');
-        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color 0.15s;';
+      function renderGrid() {
+        gridDiv.innerHTML = '';
+        library.forEach(img => {
+          const isPresent = currentImages.has(img.name);
+          if (activeFilter === 'missing' && isPresent) return;
+          if (activeFilter === 'present' && !isPresent) return;
 
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = currentImages.has(img.name);
-        cb.style.cssText = 'accent-color:var(--accent2);cursor:pointer;align-self:flex-end;';
-        cb.addEventListener('change', () => {
-          if (cb.checked) currentImages.add(img.name);
-          else currentImages.delete(img.name);
-          updateCount();
-          card.style.borderColor = cb.checked ? 'var(--accent2)' : 'var(--border)';
+          const card = document.createElement('label');
+          card.style.cssText = 'background:var(--surface2);border:1px solid ' + (isPresent ? 'var(--accent2)' : 'var(--border)') + ';border-radius:4px;padding:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color 0.15s;';
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = isPresent;
+          cb.style.cssText = 'accent-color:var(--accent2);cursor:pointer;align-self:flex-end;';
+          cb.addEventListener('change', () => {
+            if (cb.checked) currentImages.add(img.name);
+            else currentImages.delete(img.name);
+            updateCount();
+            card.style.borderColor = cb.checked ? 'var(--accent2)' : 'var(--border)';
+          });
+          card.appendChild(cb);
+
+          const imgEl = document.createElement('img');
+          imgEl.src = img.dataUrl;
+          imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
+          card.appendChild(imgEl);
+
+          const label = document.createElement('span');
+          label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+          label.textContent = img.name;
+          card.appendChild(label);
+
+          gridDiv.appendChild(card);
         });
-        card.appendChild(cb);
-        if (cb.checked) card.style.borderColor = 'var(--accent2)';
-
-        const imgEl = document.createElement('img');
-        imgEl.src = img.dataUrl;
-        imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
-        card.appendChild(imgEl);
-
-        const label = document.createElement('span');
-        label.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
-        label.textContent = img.name;
-        card.appendChild(label);
-
-        gridDiv.appendChild(card);
-      });
+      }
+      renderGrid();
       panel.appendChild(gridDiv);
 
       // Footer
