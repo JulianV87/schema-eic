@@ -1531,13 +1531,13 @@ const Annotations = (() => {
     // Numéro en cercle (légende)
     if (annotation.number != null) {
       ctx.beginPath();
-      ctx.arc(x + imgW + 8, y + imgH / 2, 8, 0, Math.PI * 2);
+      ctx.arc(pos.x + imgW / 2 + 8, pos.y, 8, 0, Math.PI * 2);
       ctx.fillStyle = annotation.color;
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 9px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(String(annotation.number), x + imgW + 8, y + imgH / 2 + 3);
+      ctx.fillText(String(annotation.number), pos.x + imgW / 2 + 8, pos.y + 3);
     }
 
     // Label en dessous
@@ -1547,11 +1547,9 @@ const Annotations = (() => {
       ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(0,0,0,0.8)';
       ctx.shadowBlur = 3;
-      ctx.fillText(annotation.label, pos.x, y + imgH + 12);
+      ctx.fillText(annotation.label, pos.x, pos.y + imgH / 2 + 12);
       ctx.shadowBlur = 0;
     }
-
-    ctx.restore();
   }
 
   /**
