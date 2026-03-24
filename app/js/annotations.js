@@ -133,6 +133,26 @@ const Annotations = (() => {
       });
     });
 
+    // Drag & drop de stickers sur le viewer
+    const osdEl = document.getElementById('osd-viewer');
+    osdEl.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/eic-sticker')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    osdEl.addEventListener('drop', (e) => {
+      const raw = e.dataTransfer.getData('application/eic-sticker');
+      if (!raw) return;
+      e.preventDefault();
+      const data = JSON.parse(raw);
+      const viewer = Viewer.getMainViewer();
+      const rect = osdEl.getBoundingClientRect();
+      const pixel = new OpenSeadragon.Point(e.clientX - rect.left, e.clientY - rect.top);
+      const vp = viewer.viewport.pointFromPixel(pixel);
+      addImageAnnotation(vp.x, vp.y, data.src, data.name);
+    });
+
     // Clic sur le viewer → placer annotation
     const viewer = Viewer.getMainViewer();
 
@@ -1692,15 +1712,21 @@ const Annotations = (() => {
         const img = library.find(i => i.name === imgName);
         if (!img) return;
         const card = document.createElement('div');
-        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:grab;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+        card.draggable = true;
         card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
         card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('application/eic-sticker', JSON.stringify({ src: img.dataUrl, name: img.name }));
+          e.dataTransfer.effectAllowed = 'copy';
+          setTimeout(() => closeAllFlyouts(), 0);
+        });
         const imgEl = document.createElement('img');
         imgEl.src = img.dataUrl;
-        imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;';
+        imgEl.style.cssText = 'max-height:30px;max-width:100%;object-fit:contain;pointer-events:none;';
         card.appendChild(imgEl);
         const name = document.createElement('span');
-        name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;';
+        name.style.cssText = 'font-family:var(--mono);font-size:7px;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;pointer-events:none;';
         name.textContent = img.name;
         card.appendChild(name);
         card.addEventListener('click', () => {
@@ -2337,13 +2363,22 @@ const Annotations = (() => {
       item.addEventListener('mouseenter', () => item.style.background = 'var(--surface2)');
       item.addEventListener('mouseleave', () => item.style.background = 'none');
 
+      item.draggable = true;
+      item.style.cssText += 'cursor:grab;';
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('application/eic-sticker', JSON.stringify({ src: sticker.imageSrc, name: sticker.name }));
+        e.dataTransfer.effectAllowed = 'copy';
+        setTimeout(() => menu.remove(), 0);
+      });
+
       if (sticker.imageSrc) {
         const img = document.createElement('img');
         img.src = sticker.imageSrc;
-        img.style.cssText = 'max-height:20px;max-width:28px;object-fit:contain;';
+        img.style.cssText = 'max-height:20px;max-width:28px;object-fit:contain;pointer-events:none;';
         item.appendChild(img);
       }
       const label = document.createElement('span');
+      label.style.cssText = 'pointer-events:none;';
       label.textContent = sticker.name;
       item.appendChild(label);
 
