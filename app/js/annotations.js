@@ -377,13 +377,18 @@ const Annotations = (() => {
       if (calBtn) { calBtn.classList.remove('active'); calBtn.click(); }
     }
 
+    // Le bouton "pointer" désactive tout outil → retour souris normale
+    if (tool === 'pointer') tool = null;
+
     activeTool = tool;
     pendingFirstPoint = null;
+    pendingImageSrc = null;
+    pendingImageLabel = null;
     isDrawing = false;
     drawPoints = [];
     hideStatusMessage();
     document.querySelectorAll('.tool-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tool === tool);
+      btn.classList.toggle('active', btn.dataset.tool === tool || (tool === null && btn.dataset.tool === 'pointer'));
     });
 
     // Activer la baguette magique
@@ -532,7 +537,7 @@ const Annotations = (() => {
 
     const bar = document.createElement('div');
     bar.id = 'sticker-edit-bar';
-    bar.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:300;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:var(--mono);font-size:10px;';
+    bar.style.cssText = 'position:fixed;top:50%;right:12px;transform:translateY(-50%);z-index:300;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 8px;display:flex;flex-direction:column;gap:8px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:var(--mono);font-size:10px;';
 
     const info = document.createElement('span');
     info.style.cssText = 'color:var(--accent2);font-weight:600;';
