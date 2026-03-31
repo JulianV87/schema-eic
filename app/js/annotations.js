@@ -826,7 +826,18 @@ const Annotations = (() => {
 
         const labelSpan = document.createElement('span');
         labelSpan.style.cssText = 'display:flex; align-items:center; gap:6px; flex:1; min-width:0; overflow:hidden;';
-        labelSpan.innerHTML = `<span style="color:${a.color || '#c8daf5'}; font-size:13px; flex-shrink:0;">${icon}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+        if (a.type === 'image' && a.src) {
+          const thumb = document.createElement('img');
+          thumb.src = a.src;
+          thumb.style.cssText = 'height:16px;width:auto;flex-shrink:0;background:#fff;border-radius:2px;padding:1px;';
+          labelSpan.appendChild(thumb);
+          const txt = document.createElement('span');
+          txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+          txt.textContent = label;
+          labelSpan.appendChild(txt);
+        } else {
+          labelSpan.innerHTML = `<span style="color:${a.color || '#c8daf5'}; font-size:13px; flex-shrink:0;">${icon}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+        }
 
         const actions = document.createElement('span');
         actions.style.cssText = 'display:flex; gap:2px; flex-shrink:0;';
@@ -1001,7 +1012,18 @@ const Annotations = (() => {
 
       const labelSpan = document.createElement('span');
       labelSpan.style.cssText = `display:flex; align-items:center; gap:6px; flex:1; min-width:0;`;
-      labelSpan.innerHTML = `<span style="color:${color}; font-size:14px;">${getAnnotationIcon(a)}</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+      if (a.type === 'image' && a.src) {
+        const thumb = document.createElement('img');
+        thumb.src = a.src;
+        thumb.style.cssText = 'height:16px;width:auto;flex-shrink:0;background:#fff;border-radius:2px;padding:1px;';
+        labelSpan.appendChild(thumb);
+        const txt = document.createElement('span');
+        txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        txt.textContent = label;
+        labelSpan.appendChild(txt);
+      } else {
+        labelSpan.innerHTML = `<span style="color:${color}; font-size:14px;">${getAnnotationIcon(a)}</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+      }
 
       const actions = document.createElement('span');
       actions.style.cssText = 'display:flex; gap:4px; flex-shrink:0;';
