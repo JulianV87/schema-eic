@@ -803,7 +803,8 @@ html, body {
 #viewer-wrapper { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
 #viewer-container { flex: 1; position: relative; background: #000; overflow: hidden; }
-#osd-viewer { width: 100%; height: 100%; overflow: hidden; }
+#osd-viewer { width: 100%; height: 100%; overflow: hidden; cursor: grab; }
+#osd-viewer:active { cursor: grabbing; }
 
 /* ZOOM CONTROLS */
 #zoom-controls {
