@@ -725,6 +725,29 @@ const Annotations = (() => {
     });
     bar.appendChild(colorRow);
 
+    // Opacité
+    const opacLabel = document.createElement('span');
+    opacLabel.style.cssText = 'color:var(--muted);';
+    opacLabel.textContent = 'Opacité';
+    bar.appendChild(opacLabel);
+
+    const opacSlider = document.createElement('input');
+    opacSlider.type = 'range';
+    opacSlider.min = '0.1';
+    opacSlider.max = '1';
+    opacSlider.step = '0.05';
+    opacSlider.value = String(annotation.opacity ?? 1);
+    opacSlider.style.cssText = 'width:100%;cursor:pointer;accent-color:var(--accent);';
+    opacSlider.addEventListener('input', () => {
+      annotation.opacity = parseFloat(opacSlider.value);
+      redraw();
+    });
+    opacSlider.addEventListener('change', () => {
+      pushUndo();
+      saveToLocalStorage();
+    });
+    bar.appendChild(opacSlider);
+
     // Rotation + Miroir uniquement pour les images
     if (isImage) {
       const rotLabel = document.createElement('span');
@@ -1393,6 +1416,7 @@ const Annotations = (() => {
 
     annotations.forEach(a => {
       const screen = Viewer.schemaToScreen(a.x, a.y);
+      ctx.globalAlpha = a.opacity ?? 1;
 
       switch (a.type) {
         case 'element-highlight':
@@ -1417,6 +1441,7 @@ const Annotations = (() => {
           drawImageAnnotation(ctx, screen, a);
           break;
       }
+      ctx.globalAlpha = 1;
     });
 
     // Rectangle de texte en cours de dessin
