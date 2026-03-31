@@ -1524,6 +1524,28 @@ const Annotations = (() => {
     ctx.translate(pos.x, pos.y);
     ctx.rotate(rot);
     ctx.scale(mirror, 1);
+
+    // Fond blanc arrondi derrière le sticker pour visibilité sur fond sombre
+    const pad = Math.max(imgW, imgH) * 0.06;
+    const r = Math.max(imgW, imgH) * 0.08;
+    const bx = -imgW / 2 - pad;
+    const by = -imgH / 2 - pad;
+    const bw = imgW + pad * 2;
+    const bh = imgH + pad * 2;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(bx + r, by);
+    ctx.lineTo(bx + bw - r, by);
+    ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+    ctx.lineTo(bx + bw, by + bh - r);
+    ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+    ctx.lineTo(bx + r, by + bh);
+    ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+    ctx.lineTo(bx, by + r);
+    ctx.quadraticCurveTo(bx, by, bx + r, by);
+    ctx.closePath();
+    ctx.fill();
+
     ctx.drawImage(img, -imgW / 2, -imgH / 2, imgW, imgH);
     ctx.restore();
 
