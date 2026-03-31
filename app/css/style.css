@@ -1339,7 +1339,7 @@ html, body {
 
 /* Paint Toolbar */
 #paint-toolbar {
-  display: flex;
+  display: none;
   align-items: stretch;
   gap: 0;
   padding: 4px 8px;
@@ -1347,6 +1347,9 @@ html, body {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   overflow-x: auto;
+}
+#paint-toolbar.visible {
+  display: flex;
 }
 .paint-section {
   display: flex;

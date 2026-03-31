@@ -3141,6 +3141,16 @@ const Annotations = (() => {
   }
 
   function initPaintToolbar() {
+    // Toggle bouton
+    const toggleBtn = document.getElementById('btn-paint-toggle');
+    const toolbar = document.getElementById('paint-toolbar');
+    if (toggleBtn && toolbar) {
+      toggleBtn.addEventListener('click', () => {
+        toolbar.classList.toggle('visible');
+        toggleBtn.classList.toggle('active', toolbar.classList.contains('visible'));
+      });
+    }
+
     // Palette
     const palette = document.querySelector('.paint-palette');
     if (palette) {
