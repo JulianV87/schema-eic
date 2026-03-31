@@ -1734,7 +1734,7 @@ const Annotations = (() => {
         const img = library.find(i => i.name === imgName);
         if (!img) return;
         const card = document.createElement('div');
-        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:3px;cursor:grab;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+        card.style.cssText = 'background:#fff;border:1px solid var(--border);border-radius:3px;padding:3px;cursor:grab;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
         card.draggable = true;
         card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
         card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
@@ -2396,7 +2396,7 @@ const Annotations = (() => {
       if (sticker.imageSrc) {
         const img = document.createElement('img');
         img.src = sticker.imageSrc;
-        img.style.cssText = 'max-height:20px;max-width:28px;object-fit:contain;pointer-events:none;';
+        img.style.cssText = 'max-height:20px;max-width:28px;object-fit:contain;pointer-events:none;background:#fff;border-radius:2px;padding:1px;';
         item.appendChild(img);
       }
       const label = document.createElement('span');
