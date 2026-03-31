@@ -925,7 +925,7 @@ html, body {
 .legend-item-text {
   flex: 1;
 }
-.legend-item-text input {
+.legend-item-text textarea {
   width: 100%;
   min-width: 180px;
   background: var(--surface2);
@@ -936,8 +936,11 @@ html, body {
   font-family: var(--mono);
   font-size: 11px;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.4;
 }
-.legend-item-text input:focus { border-color: var(--accent); }
+.legend-item-text textarea:focus { border-color: var(--accent); }
 .legend-empty {
   padding: 12px;
   color: var(--muted);

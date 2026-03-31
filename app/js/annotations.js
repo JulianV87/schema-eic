@@ -2504,22 +2504,25 @@ const Annotations = (() => {
         numBadge.style.background = a.color;
         numBadge.textContent = String(a.number);
 
-        // Champ éditable
+        // Champ éditable (textarea auto-resize)
         const textWrap = document.createElement('span');
         textWrap.className = 'legend-item-text';
-        const input = document.createElement('input');
-        input.type = 'text';
+        const input = document.createElement('textarea');
+        input.rows = 1;
         input.value = a.legendText || a.trainNumber || a.message || '';
         input.placeholder = 'Description...';
-        input.addEventListener('change', () => {
+        const autoResize = () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; };
+        input.addEventListener('input', () => {
           a.legendText = input.value;
           saveToLocalStorage();
+          autoResize();
         });
         input.addEventListener('blur', () => {
           a.legendText = input.value;
           saveToLocalStorage();
         });
         textWrap.appendChild(input);
+        requestAnimationFrame(autoResize);
 
         row.appendChild(icon);
         row.appendChild(numBadge);
