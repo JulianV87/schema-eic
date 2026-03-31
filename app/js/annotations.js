@@ -349,7 +349,7 @@ const Annotations = (() => {
           delta = Math.abs(dW) > Math.abs(dH) ? dW : dH;
         }
 
-        const newW = Math.max(0.003, resizeAnnotOrigin.vpW + delta);
+        const newW = Math.max(0.0005, resizeAnnotOrigin.vpW + delta);
         const newH = newW / ratio;
 
         selectedAnnot.vpW = newW;
