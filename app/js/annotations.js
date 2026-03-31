@@ -112,6 +112,9 @@ const Annotations = (() => {
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+      // Ignorer les raccourcis si on tape dans un champ texte
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       // Mode édition sticker
       if (editingSticker) {
         if (e.key === 'Enter') { e.preventDefault(); exitStickerEditMode(); }
