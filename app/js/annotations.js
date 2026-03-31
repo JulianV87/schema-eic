@@ -140,11 +140,6 @@ const Annotations = (() => {
       });
     });
 
-    // Boutons Annuler / Refaire
-    const btnUndo = document.getElementById('btn-undo');
-    const btnRedo = document.getElementById('btn-redo');
-    if (btnUndo) btnUndo.addEventListener('click', () => undo());
-    if (btnRedo) btnRedo.addEventListener('click', () => redo());
 
     // Drag & drop de stickers sur le viewer
     const osdEl = document.getElementById('osd-viewer');
@@ -745,6 +740,17 @@ const Annotations = (() => {
       exitStickerEditMode();
     });
     bar.appendChild(delBtn);
+
+    // Séparateur
+    const sep2 = document.createElement('span');
+    sep2.style.cssText = 'width:100%;height:1px;background:var(--border);';
+    bar.appendChild(sep2);
+
+    // Annuler / Refaire
+    const undoBtn = createEditBtn('↩ Annuler', () => { undo(); exitStickerEditMode(); });
+    bar.appendChild(undoBtn);
+    const redoBtn = createEditBtn('↪ Refaire', () => { redo(); exitStickerEditMode(); });
+    bar.appendChild(redoBtn);
 
     document.body.appendChild(bar);
     stickerEditBar = bar;
