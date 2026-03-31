@@ -1757,49 +1757,44 @@ const Annotations = (() => {
     const fontStr = fontParts.join(' ');
     const lineH = fSize * 1.3;
 
-    // Si l'annotation a des dimensions de rectangle
+    // Ombre pour lisibilité
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = annotation.color;
+    ctx.font = fontStr;
+
+    // Si l'annotation a des dimensions de rectangle (retour à la ligne)
     if (annotation.vpW && annotation.vpH && viewer) {
       const topLeft = viewer.viewport.viewportToViewerElementCoordinates(
         new OpenSeadragon.Point(annotation.x - annotation.vpW / 2, annotation.y - annotation.vpH / 2));
       const botRight = viewer.viewport.viewportToViewerElementCoordinates(
         new OpenSeadragon.Point(annotation.x + annotation.vpW / 2, annotation.y + annotation.vpH / 2));
       const w = (botRight.x - topLeft.x) / s;
-      const h = (botRight.y - topLeft.y) / s;
 
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.beginPath();
-      roundRect(ctx, -w / 2, -h / 2, w, h, 3);
-      ctx.fill();
-
-      // Dessiner le texte avec retour à la ligne
-      ctx.fillStyle = annotation.color;
-      ctx.font = fontStr;
       ctx.textAlign = 'left';
       const lines = wrapText(ctx, annotation.text, w - 8);
-      const startY = -h / 2 + fSize + 2;
+      const totalH = lines.length * lineH;
+      const startY = -totalH / 2 + fSize;
       lines.forEach((line, i) => {
         const ly = startY + i * lineH;
         ctx.fillText(line, -w / 2 + 4, ly);
         if (annotation.underline) {
+          ctx.shadowBlur = 0;
           const m = ctx.measureText(line);
           ctx.fillRect(-w / 2 + 4, ly + 2, m.width, 1);
+          ctx.shadowBlur = 4;
         }
       });
     } else {
-      // Fallback : ancien affichage simple
-      ctx.font = fontStr;
-      const metrics = ctx.measureText(annotation.text);
-      const padding = 4;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.beginPath();
-      roundRect(ctx, -padding, -(fSize), metrics.width + padding * 2, fSize + 6, 3);
-      ctx.fill();
-      ctx.fillStyle = annotation.color;
+      // Texte simple
       ctx.fillText(annotation.text, 0, 0);
       if (annotation.underline) {
+        ctx.shadowBlur = 0;
+        const metrics = ctx.measureText(annotation.text);
         ctx.fillRect(0, 2, metrics.width, 1);
       }
     }
+    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
