@@ -168,19 +168,17 @@ const Annotations = (() => {
       // Si on vient de finir un drag/resize, ne pas traiter le clic
       if (isDraggingAnnot || isResizingAnnot) return;
 
-      // Vérifier si on clique sur un sticker
-      const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y);
+      // Vérifier si on clique sur une annotation (sticker ou autre)
+      const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y)
+                    || hitTestAllAnnotations(viewportPoint.x, viewportPoint.y);
 
-      // En mode édition : clic sur le même sticker → rien, clic sur un autre → coller et sélectionner l'autre, clic ailleurs → coller
+      // En mode édition : clic sur le même → rien, clic sur un autre → basculer, clic ailleurs → quitter
       if (editingSticker) {
         if (hitAnnot && hitAnnot.id === editingSticker.id) {
-          // Clic sur le sticker en cours d'édition — laisser le drag gérer
           return;
         }
-        // Clic ailleurs ou sur un autre sticker → coller le sticker en cours
         event.preventDefaultAction = true;
         exitStickerEditMode();
-        // Si on a cliqué sur un autre sticker, le sélectionner
         if (hitAnnot) {
           enterStickerEditMode(hitAnnot);
           redraw();
@@ -188,7 +186,7 @@ const Annotations = (() => {
         return;
       }
 
-      // Pas en mode édition : clic sur un sticker → le sélectionner
+      // Pas en mode édition : clic sur une annotation → la sélectionner
       if (hitAnnot) {
         event.preventDefaultAction = true;
         enterStickerEditMode(hitAnnot);
@@ -304,34 +302,48 @@ const Annotations = (() => {
       redraw();
     });
 
-    // Déplacement / redimensionnement de stickers
+    // Déplacement / redimensionnement d'annotations (stickers + classiques)
     viewer.addHandler('canvas-press', (event) => {
       if (!selectedAnnot && !editingSticker) return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
       const target = editingSticker || selectedAnnot;
-      if (!target || target.type !== 'image') return;
+      if (!target) return;
 
       const vp = viewer.viewport.pointFromPixel(event.position);
-      const vpSize = getAnnotViewportSize(target);
 
-      // Tester les poignées de redimensionnement
-      const handle = hitTestAnnotHandle(vp.x, vp.y, target, vpSize);
-      if (handle) {
-        event.preventDefaultAction = true;
-        isResizingAnnot = true;
-        selectedAnnot = target;
-        resizeAnnotHandle = handle;
-        resizeAnnotOrigin = { x: vp.x, y: vp.y, vpW: target.vpW || STICKER_VP_WIDTH, vpH: target.vpH || STICKER_VP_HEIGHT };
-        return;
+      // Pour les images : poignées de redimensionnement
+      if (target.type === 'image') {
+        const vpSize = getAnnotViewportSize(target);
+        const handle = hitTestAnnotHandle(vp.x, vp.y, target, vpSize);
+        if (handle) {
+          event.preventDefaultAction = true;
+          isResizingAnnot = true;
+          selectedAnnot = target;
+          resizeAnnotHandle = handle;
+          resizeAnnotOrigin = { x: vp.x, y: vp.y, vpW: target.vpW || STICKER_VP_WIDTH, vpH: target.vpH || STICKER_VP_HEIGHT };
+          return;
+        }
+        if (isPointInAnnot(vp.x, vp.y, target, vpSize)) {
+          event.preventDefaultAction = true;
+          isDraggingAnnot = true;
+          selectedAnnot = target;
+          dragAnnotOffset = { dx: target.x - vp.x, dy: target.y - vp.y };
+          pushUndo();
+          return;
+        }
       }
 
-      // Tester si on est sur l'annotation → déplacer
-      if (isPointInAnnot(vp.x, vp.y, target, vpSize)) {
-        event.preventDefaultAction = true;
-        isDraggingAnnot = true;
-        selectedAnnot = target;
-        dragAnnotOffset = { dx: target.x - vp.x, dy: target.y - vp.y };
-        pushUndo();
+      // Pour toutes les annotations : déplacement par proximité
+      if (target.type !== 'image') {
+        const s = target.scale || 1;
+        const r = ANNOT_HIT_RADIUS * s;
+        if (Math.abs(vp.x - target.x) <= r && Math.abs(vp.y - target.y) <= r) {
+          event.preventDefaultAction = true;
+          isDraggingAnnot = true;
+          selectedAnnot = target;
+          dragAnnotOffset = { dx: target.x - vp.x, dy: target.y - vp.y };
+          pushUndo();
+        }
       }
     });
 
@@ -564,6 +576,8 @@ const Annotations = (() => {
     editingSticker = annotation;
     selectedAnnot = annotation;
 
+    const isImage = annotation.type === 'image';
+
     // Barre d'outils d'édition
     const old = document.getElementById('sticker-edit-bar');
     if (old) old.remove();
@@ -574,7 +588,7 @@ const Annotations = (() => {
 
     const info = document.createElement('span');
     info.style.cssText = 'color:var(--accent2);font-weight:600;';
-    info.textContent = 'Sticker : ' + (annotation.label || 'Image');
+    info.textContent = annotation.label || annotation.trainNumber || annotation.text || 'Annotation';
     bar.appendChild(info);
 
     // Taille +/-
@@ -584,43 +598,52 @@ const Annotations = (() => {
     bar.appendChild(sizeLabel);
 
     const sizeDown = createEditBtn('−', () => {
-      annotation.vpW *= 0.8;
-      annotation.vpH *= 0.8;
+      if (isImage) {
+        annotation.vpW *= 0.8;
+        annotation.vpH *= 0.8;
+      } else {
+        annotation.scale = (annotation.scale || 1) * 0.8;
+      }
       redraw();
     });
     bar.appendChild(sizeDown);
 
     const sizeUp = createEditBtn('+', () => {
-      annotation.vpW *= 1.25;
-      annotation.vpH *= 1.25;
+      if (isImage) {
+        annotation.vpW *= 1.25;
+        annotation.vpH *= 1.25;
+      } else {
+        annotation.scale = (annotation.scale || 1) * 1.25;
+      }
       redraw();
     });
     bar.appendChild(sizeUp);
 
-    // Rotation
-    const rotLabel = document.createElement('span');
-    rotLabel.style.cssText = 'color:var(--muted);';
-    rotLabel.textContent = 'Rotation';
-    bar.appendChild(rotLabel);
+    // Rotation + Miroir uniquement pour les images
+    if (isImage) {
+      const rotLabel = document.createElement('span');
+      rotLabel.style.cssText = 'color:var(--muted);';
+      rotLabel.textContent = 'Rotation';
+      bar.appendChild(rotLabel);
 
-    const rotLeft = createEditBtn('↶', () => {
-      annotation.rotation = (annotation.rotation || 0) - 15;
-      redraw();
-    });
-    bar.appendChild(rotLeft);
+      const rotLeft = createEditBtn('↶', () => {
+        annotation.rotation = (annotation.rotation || 0) - 15;
+        redraw();
+      });
+      bar.appendChild(rotLeft);
 
-    const rotRight = createEditBtn('↷', () => {
-      annotation.rotation = (annotation.rotation || 0) + 15;
-      redraw();
-    });
-    bar.appendChild(rotRight);
+      const rotRight = createEditBtn('↷', () => {
+        annotation.rotation = (annotation.rotation || 0) + 15;
+        redraw();
+      });
+      bar.appendChild(rotRight);
 
-    // Miroir
-    const mirrorBtn = createEditBtn('⇔ Miroir', () => {
-      annotation.mirrorX = !annotation.mirrorX;
-      redraw();
-    });
-    bar.appendChild(mirrorBtn);
+      const mirrorBtn = createEditBtn('⇔ Miroir', () => {
+        annotation.mirrorX = !annotation.mirrorX;
+        redraw();
+      });
+      bar.appendChild(mirrorBtn);
+    }
 
     // Séparateur
     const sep = document.createElement('span');
@@ -641,7 +664,7 @@ const Annotations = (() => {
     document.body.appendChild(bar);
     stickerEditBar = bar;
 
-    showStatusMessage('Cliquez en dehors pour coller — Suppr pour supprimer');
+    showStatusMessage('Cliquez en dehors pour valider — Suppr pour supprimer');
   }
 
   function exitStickerEditMode() {
@@ -1322,7 +1345,10 @@ const Annotations = (() => {
   }
 
   function drawTrainSymbol(ctx, pos, annotation) {
+    const s = annotation.scale || 1;
     ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(s, s);
     ctx.textAlign = 'center';
 
     // Numéro d'ordre (pastille en haut à droite)
@@ -1330,10 +1356,10 @@ const Annotations = (() => {
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.fillStyle = annotation.color;
       ctx.beginPath();
-      ctx.arc(pos.x + 14, pos.y - 8, 8, 0, Math.PI * 2);
+      ctx.arc(14, -8, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(String(annotation.number), pos.x + 14, pos.y - 5);
+      ctx.fillText(String(annotation.number), 14, -5);
     }
 
     // Symbole principal
@@ -1341,7 +1367,7 @@ const Annotations = (() => {
     ctx.fillStyle = annotation.color;
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 4;
-    ctx.fillText(annotation.symbol, pos.x, pos.y + 8);
+    ctx.fillText(annotation.symbol, 0, 8);
     ctx.shadowBlur = 0;
 
     // Numéro de train en dessous
@@ -1353,33 +1379,39 @@ const Annotations = (() => {
 
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.beginPath();
-      roundRect(ctx, pos.x - metrics.width / 2 - padding, pos.y + 14, metrics.width + padding * 2, 14, 2);
+      roundRect(ctx, -metrics.width / 2 - padding, 14, metrics.width + padding * 2, 14, 2);
       ctx.fill();
 
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(label, pos.x, pos.y + 25);
+      ctx.fillText(label, 0, 25);
     }
     ctx.restore();
   }
 
   function drawText(ctx, pos, annotation) {
+    const s = annotation.scale || 1;
     ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(s, s);
     ctx.font = '12px "JetBrains Mono", monospace';
     const metrics = ctx.measureText(annotation.text);
     const padding = 4;
 
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.beginPath();
-    roundRect(ctx, pos.x - padding, pos.y - 12, metrics.width + padding * 2, 18, 3);
+    roundRect(ctx, -padding, -12, metrics.width + padding * 2, 18, 3);
     ctx.fill();
 
     ctx.fillStyle = annotation.color;
-    ctx.fillText(annotation.text, pos.x, pos.y);
+    ctx.fillText(annotation.text, 0, 0);
     ctx.restore();
   }
 
   function drawMarker(ctx, pos, annotation) {
+    const s = annotation.scale || 1;
     ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.scale(s, s);
     ctx.textAlign = 'center';
 
     // Numéro d'ordre (pastille en haut à droite)
@@ -1387,10 +1419,10 @@ const Annotations = (() => {
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.fillStyle = annotation.color;
       ctx.beginPath();
-      ctx.arc(pos.x + 14, pos.y - 8, 8, 0, Math.PI * 2);
+      ctx.arc(14, -8, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(String(annotation.number), pos.x + 14, pos.y - 5);
+      ctx.fillText(String(annotation.number), 14, -5);
     }
 
     // Symbole
@@ -1399,7 +1431,7 @@ const Annotations = (() => {
     ctx.fillStyle = annotation.color;
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 4;
-    ctx.fillText(symbol, pos.x, pos.y + 7);
+    ctx.fillText(symbol, 0, 7);
     ctx.shadowBlur = 0;
 
     // Label en dessous
@@ -1409,10 +1441,10 @@ const Annotations = (() => {
       const pad = 3;
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.beginPath();
-      roundRect(ctx, pos.x - metrics.width / 2 - pad, pos.y + 14, metrics.width + pad * 2, 13, 2);
+      roundRect(ctx, -metrics.width / 2 - pad, 14, metrics.width + pad * 2, 13, 2);
       ctx.fill();
       ctx.fillStyle = annotation.color;
-      ctx.fillText(annotation.label, pos.x, pos.y + 24);
+      ctx.fillText(annotation.label, 0, 24);
     }
     ctx.restore();
   }
@@ -1498,6 +1530,19 @@ const Annotations = (() => {
       if (a.type !== 'image') continue;
       const vpSize = getAnnotViewportSize(a);
       if (isPointInAnnot(px, py, a, vpSize)) return a;
+    }
+    return null;
+  }
+
+  // Hit-test pour toutes les annotations non-image (train, marker, text, line)
+  const ANNOT_HIT_RADIUS = 0.008; // rayon en coordonnées viewport
+  function hitTestAllAnnotations(px, py) {
+    for (let i = annotations.length - 1; i >= 0; i--) {
+      const a = annotations[i];
+      if (a.type === 'image') continue; // géré par hitTestImageAnnotation
+      const s = a.scale || 1;
+      const r = ANNOT_HIT_RADIUS * s;
+      if (Math.abs(px - a.x) <= r && Math.abs(py - a.y) <= r) return a;
     }
     return null;
   }
