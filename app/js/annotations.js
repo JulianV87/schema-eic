@@ -202,9 +202,11 @@ const Annotations = (() => {
 
       // Outils train
       if (TRAIN_SYMBOLS[activeTool]) {
+        const tool = activeTool;
         promptTrainNumber((trainNumber) => {
-          addTrainAnnotation(activeTool, viewportPoint.x, viewportPoint.y, trainNumber);
+          addTrainAnnotation(tool, viewportPoint.x, viewportPoint.y, trainNumber);
         });
+        setActiveTool(null);
       }
       // Outils ligne à 2 points (voie coupée, ralentissement, libérée, caténaire)
       else if (TWO_POINT_TOOLS.includes(activeTool)) {
@@ -217,11 +219,13 @@ const Annotations = (() => {
           addLineAnnotation(activeTool, pendingFirstPoint.x, pendingFirstPoint.y, viewportPoint.x, viewportPoint.y);
           pendingFirstPoint = null;
           hideStatusMessage();
+          setActiveTool(null);
         }
       }
       // Marqueurs ponctuels (obstacle, danger)
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
+        setActiveTool(null);
       }
       // Image depuis la bibliothèque (placement d'un nouveau sticker — un seul puis retour curseur)
       else if (activeTool === 'image-library' && pendingImageSrc && !editingSticker) {
@@ -234,6 +238,7 @@ const Annotations = (() => {
       else if (activeTool === 'text') {
         const text = prompt('Texte :');
         if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
+        setActiveTool(null);
       }
       // Annotations custom (symbole/point ou ligne)
       else if (activeTool && activeTool.startsWith('custom-')) {
@@ -253,10 +258,12 @@ const Annotations = (() => {
             lastAnnot.symbol = custom.symbol;
             pendingFirstPoint = null;
             hideStatusMessage();
+            setActiveTool(null);
             redraw();
           }
         } else {
           addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, custom.name);
+          setActiveTool(null);
           const lastAnnot = annotations[annotations.length - 1];
           lastAnnot.symbol = custom.symbol;
           lastAnnot.color = custom.color;
