@@ -549,16 +549,20 @@ const Annotations = (() => {
   /**
    * Ajouter un texte libre
    */
-  function addTextAnnotation(x, y, text, vpW, vpH) {
+  function addTextAnnotation(x, y, text, vpW, vpH, textStyle) {
     const annotation = {
       id: nextId++,
       type: 'text',
       x: x,
       y: y,
       text: text,
-      color: '#ffffff',
+      color: (textStyle && textStyle.color) || '#ffffff',
       vpW: vpW || 0,
       vpH: vpH || 0,
+      bold: (textStyle && textStyle.bold) || false,
+      italic: (textStyle && textStyle.italic) || false,
+      underline: (textStyle && textStyle.underline) || false,
+      fontSize: (textStyle && textStyle.fontSize) || 12,
     };
     pushUndo();
     annotations.push(annotation);
@@ -589,38 +593,138 @@ const Annotations = (() => {
     const viewerEl = document.getElementById('osd-viewer');
     const vrect = viewerEl.getBoundingClientRect();
 
-    const old = document.getElementById('text-box-editor');
+    const old = document.getElementById('text-box-editor-wrap');
     if (old) old.remove();
 
+    // État du style
+    const style = { bold: false, italic: false, underline: false, fontSize: 12, color: '#ffffff' };
+
+    // Container
+    const wrap = document.createElement('div');
+    wrap.id = 'text-box-editor-wrap';
+    wrap.style.cssText = `
+      position:fixed;
+      left:${vrect.left + sp1.x}px; top:${vrect.top + sp1.y - 32}px;
+      z-index:400;
+    `;
+
+    // Barre d'outils type Paint
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = 'display:flex;align-items:center;gap:2px;padding:3px 4px;background:#1a2540;border:1px solid #3080ff;border-bottom:none;border-radius:4px 4px 0 0;';
+
+    function makeToolBtn(label, title, active, onClick) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.title = title;
+      btn.style.cssText = `padding:2px 6px;background:${active ? '#3080ff' : 'transparent'};border:1px solid ${active ? '#3080ff' : '#2a4266'};border-radius:3px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;font-weight:${label === 'G' ? 'bold' : 'normal'};font-style:${label === 'I' ? 'italic' : 'normal'};text-decoration:${label === 'S' ? 'underline' : 'none'};`;
+      btn.addEventListener('click', (e) => { e.preventDefault(); onClick(btn); ta.focus(); });
+      return btn;
+    }
+
+    const boldBtn = makeToolBtn('G', 'Gras', false, (btn) => {
+      style.bold = !style.bold;
+      btn.style.background = style.bold ? '#3080ff' : 'transparent';
+      btn.style.borderColor = style.bold ? '#3080ff' : '#2a4266';
+      ta.style.fontWeight = style.bold ? 'bold' : 'normal';
+    });
+    toolbar.appendChild(boldBtn);
+
+    const italicBtn = makeToolBtn('I', 'Italique', false, (btn) => {
+      style.italic = !style.italic;
+      btn.style.background = style.italic ? '#3080ff' : 'transparent';
+      btn.style.borderColor = style.italic ? '#3080ff' : '#2a4266';
+      ta.style.fontStyle = style.italic ? 'italic' : 'normal';
+    });
+    toolbar.appendChild(italicBtn);
+
+    const underBtn = makeToolBtn('S', 'Souligné', false, (btn) => {
+      style.underline = !style.underline;
+      btn.style.background = style.underline ? '#3080ff' : 'transparent';
+      btn.style.borderColor = style.underline ? '#3080ff' : '#2a4266';
+      ta.style.textDecoration = style.underline ? 'underline' : 'none';
+    });
+    toolbar.appendChild(underBtn);
+
+    // Séparateur
+    const sep = document.createElement('span');
+    sep.style.cssText = 'width:1px;height:16px;background:#2a4266;margin:0 2px;';
+    toolbar.appendChild(sep);
+
+    // Taille police
+    const sizeSelect = document.createElement('select');
+    sizeSelect.style.cssText = 'background:#0c1220;border:1px solid #2a4266;border-radius:3px;color:#fff;font-family:var(--mono);font-size:10px;padding:1px 2px;cursor:pointer;';
+    [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36].forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s + 'px';
+      if (s === 12) opt.selected = true;
+      sizeSelect.appendChild(opt);
+    });
+    sizeSelect.addEventListener('change', () => {
+      style.fontSize = parseInt(sizeSelect.value);
+      ta.style.fontSize = style.fontSize + 'px';
+      ta.focus();
+    });
+    toolbar.appendChild(sizeSelect);
+
+    // Séparateur
+    const sep2 = document.createElement('span');
+    sep2.style.cssText = 'width:1px;height:16px;background:#2a4266;margin:0 2px;';
+    toolbar.appendChild(sep2);
+
+    // Couleurs
+    const textColors = ['#ffffff','#ff4040','#ff9520','#ffdd00','#00d4a0','#3080ff','#9060ff','#000000'];
+    textColors.forEach(c => {
+      const swatch = document.createElement('button');
+      swatch.style.cssText = `width:14px;height:14px;border-radius:50%;border:2px solid ${c === '#ffffff' ? '#fff' : 'transparent'};background:${c};cursor:pointer;padding:0;`;
+      swatch.addEventListener('click', (e) => {
+        e.preventDefault();
+        style.color = c;
+        ta.style.color = c;
+        toolbar.querySelectorAll('.color-swatch').forEach(s => s.style.borderColor = 'transparent');
+        swatch.style.borderColor = '#fff';
+        ta.focus();
+      });
+      swatch.className = 'color-swatch';
+      toolbar.appendChild(swatch);
+    });
+
+    wrap.appendChild(toolbar);
+
+    // Textarea
     const ta = document.createElement('textarea');
     ta.id = 'text-box-editor';
     ta.placeholder = 'Saisir le texte...';
     ta.style.cssText = `
-      position:fixed;
-      left:${vrect.left + sp1.x}px; top:${vrect.top + sp1.y}px;
-      width:${sp2.x - sp1.x}px; height:${sp2.y - sp1.y}px;
+      display:block;
+      width:${Math.max(sp2.x - sp1.x, 60)}px; height:${Math.max(sp2.y - sp1.y, 24)}px;
       min-width:60px; min-height:24px;
       background:rgba(0,0,0,0.75); color:#fff;
-      border:2px solid #3080ff; border-radius:3px;
+      border:2px solid #3080ff; border-top:none; border-radius:0 0 3px 3px;
       font-family:'JetBrains Mono',monospace; font-size:12px;
-      padding:4px 6px; resize:both; z-index:400; outline:none;
+      padding:4px 6px; resize:both; outline:none;
       overflow:auto;
     `;
-    document.body.appendChild(ta);
+    wrap.appendChild(ta);
+    document.body.appendChild(wrap);
     ta.focus();
 
-    const confirm = () => {
+    const confirmText = () => {
       const text = ta.value.trim();
-      if (text) addTextAnnotation(cx, cy, text, vpW, vpH);
-      ta.remove();
+      if (text) addTextAnnotation(cx, cy, text, vpW, vpH, style);
+      wrap.remove();
       redraw();
     };
 
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirm(); }
-      if (e.key === 'Escape') { ta.remove(); redraw(); }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmText(); }
+      if (e.key === 'Escape') { wrap.remove(); redraw(); }
     });
-    ta.addEventListener('blur', () => { setTimeout(() => { if (document.getElementById('text-box-editor')) confirm(); }, 100); });
+    ta.addEventListener('blur', (e) => {
+      // Ne pas fermer si on clique sur la toolbar
+      setTimeout(() => {
+        if (!wrap.contains(document.activeElement) && document.getElementById('text-box-editor-wrap')) confirmText();
+      }, 150);
+    });
   }
 
   /**
@@ -1566,6 +1670,16 @@ const Annotations = (() => {
     ctx.translate(pos.x, pos.y);
     ctx.scale(s, s);
 
+    // Construire la font avec gras/italique
+    const fSize = annotation.fontSize || 12;
+    const fontParts = [];
+    if (annotation.italic) fontParts.push('italic');
+    if (annotation.bold) fontParts.push('bold');
+    fontParts.push(fSize + 'px');
+    fontParts.push('"JetBrains Mono", monospace');
+    const fontStr = fontParts.join(' ');
+    const lineH = fSize * 1.3;
+
     // Si l'annotation a des dimensions de rectangle
     if (annotation.vpW && annotation.vpH && viewer) {
       const topLeft = viewer.viewport.viewportToViewerElementCoordinates(
@@ -1582,25 +1696,32 @@ const Annotations = (() => {
 
       // Dessiner le texte avec retour à la ligne
       ctx.fillStyle = annotation.color;
-      ctx.font = '12px "JetBrains Mono", monospace';
+      ctx.font = fontStr;
       ctx.textAlign = 'left';
       const lines = wrapText(ctx, annotation.text, w - 8);
-      const lineH = 15;
-      const startY = -h / 2 + 14;
+      const startY = -h / 2 + fSize + 2;
       lines.forEach((line, i) => {
-        ctx.fillText(line, -w / 2 + 4, startY + i * lineH);
+        const ly = startY + i * lineH;
+        ctx.fillText(line, -w / 2 + 4, ly);
+        if (annotation.underline) {
+          const m = ctx.measureText(line);
+          ctx.fillRect(-w / 2 + 4, ly + 2, m.width, 1);
+        }
       });
     } else {
       // Fallback : ancien affichage simple
-      ctx.font = '12px "JetBrains Mono", monospace';
+      ctx.font = fontStr;
       const metrics = ctx.measureText(annotation.text);
       const padding = 4;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.beginPath();
-      roundRect(ctx, -padding, -12, metrics.width + padding * 2, 18, 3);
+      roundRect(ctx, -padding, -(fSize), metrics.width + padding * 2, fSize + 6, 3);
       ctx.fill();
       ctx.fillStyle = annotation.color;
       ctx.fillText(annotation.text, 0, 0);
+      if (annotation.underline) {
+        ctx.fillRect(0, 2, metrics.width, 1);
+      }
     }
     ctx.restore();
   }
