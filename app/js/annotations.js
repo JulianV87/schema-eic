@@ -237,10 +237,9 @@ const Annotations = (() => {
         pendingImageLabel = null;
         setActiveTool(null);
       }
-      // Texte libre — premier clic = début du rectangle
+      // Texte libre — géré par canvas-press/drag/release
       else if (activeTool === 'text') {
-        textBoxStart = { x: viewportPoint.x, y: viewportPoint.y };
-        textBoxEnd = null;
+        return;
       }
       // Annotations custom (symbole/point ou ligne)
       else if (activeTool && activeTool.startsWith('custom-')) {
@@ -308,6 +307,14 @@ const Annotations = (() => {
 
     // Déplacement / redimensionnement d'annotations (stickers + classiques)
     viewer.addHandler('canvas-press', (event) => {
+      // Outil texte : début du rectangle
+      if (activeTool === 'text') {
+        event.preventDefaultAction = true;
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        textBoxStart = { x: vp.x, y: vp.y };
+        textBoxEnd = null;
+        return;
+      }
       if (!selectedAnnot && !editingSticker) return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
       const target = editingSticker || selectedAnnot;
