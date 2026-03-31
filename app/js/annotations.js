@@ -2491,7 +2491,7 @@ const Annotations = (() => {
         if (a.type === 'image' && a.src) {
           const img = document.createElement('img');
           img.src = a.src;
-          img.style.cssText = 'height:14px;width:auto;vertical-align:middle;';
+          img.style.cssText = 'height:14px;width:auto;vertical-align:middle;background:#fff;border-radius:2px;padding:1px;';
           icon.textContent = '';
           icon.appendChild(img);
         } else {

@@ -849,8 +849,9 @@ html, body {
 /* LEGEND PANEL */
 #legend-panel {
   position: absolute;
-  min-width: 220px;
-  max-width: 600px;
+  min-width: 260px;
+  width: fit-content;
+  max-width: 80vw;
   background: rgba(12,18,32,0.95);
   border: 1px solid var(--accent2);
   border-radius: 8px;
@@ -922,11 +923,10 @@ html, body {
 }
 .legend-item-text {
   flex: 1;
-  min-width: 0;
 }
 .legend-item-text input {
   width: 100%;
-  min-width: 140px;
+  min-width: 180px;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 3px;
