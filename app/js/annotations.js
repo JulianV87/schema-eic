@@ -768,9 +768,14 @@ const Annotations = (() => {
     `;
     wrap.appendChild(ta);
     document.body.appendChild(wrap);
-    ta.focus();
+    // Délai avant de donner le focus pour éviter que le blur se déclenche immédiatement
+    let ready = false;
+    setTimeout(() => { ta.focus(); ready = true; }, 200);
 
+    let confirmed = false;
     const confirmText = () => {
+      if (confirmed) return;
+      confirmed = true;
       const text = ta.value.trim();
       if (text) addTextAnnotation(cx, cy, text, vpW, vpH, style);
       wrap.remove();
@@ -779,13 +784,13 @@ const Annotations = (() => {
 
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmText(); }
-      if (e.key === 'Escape') { wrap.remove(); redraw(); }
+      if (e.key === 'Escape') { confirmed = true; wrap.remove(); redraw(); }
     });
     ta.addEventListener('blur', (e) => {
-      // Ne pas fermer si on clique sur la toolbar
+      if (!ready) return; // Ignorer le blur initial
       setTimeout(() => {
-        if (!wrap.contains(document.activeElement) && document.getElementById('text-box-editor-wrap')) confirmText();
-      }, 150);
+        if (!confirmed && !wrap.contains(document.activeElement) && document.getElementById('text-box-editor-wrap')) confirmText();
+      }, 300);
     });
   }
 
