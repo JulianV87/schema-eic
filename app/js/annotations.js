@@ -24,6 +24,13 @@ const Annotations = (() => {
   let textBoxStart = null;  // viewport coords du coin début
   let textBoxEnd = null;    // viewport coords du coin fin (pendant le drag)
 
+  // Paint toolbar state
+  let drawColor = '#ffffff';
+  let drawColor2 = '#000000';
+  let brushSize = 3;
+  let shapeStart = null;    // viewport coords du début de forme
+  let shapeEnd = null;      // viewport coords de fin de forme (pendant drag)
+
   function pushUndo() {
     undoStack.push(JSON.stringify(annotations));
     if (undoStack.length > MAX_UNDO) undoStack.shift();
@@ -140,6 +147,9 @@ const Annotations = (() => {
       });
     });
 
+
+    // Init paint toolbar
+    initPaintToolbar();
 
     // Drag & drop de stickers sur le viewer
     const osdEl = document.getElementById('osd-viewer');
@@ -278,7 +288,7 @@ const Annotations = (() => {
     const viewerEl = document.getElementById('osd-viewer');
 
     viewer.addHandler('canvas-press', (event) => {
-      if (activeTool !== 'draw') return;
+      if (activeTool !== 'draw' && activeTool !== 'eraser') return;
       event.preventDefaultAction = true;
       isDrawing = true;
       const vp = viewer.viewport.pointFromPixel(event.position);
@@ -286,20 +296,19 @@ const Annotations = (() => {
     });
 
     viewer.addHandler('canvas-drag', (event) => {
-      if (!isDrawing || activeTool !== 'draw') return;
+      if (!isDrawing || (activeTool !== 'draw' && activeTool !== 'eraser')) return;
       event.preventDefaultAction = true;
       const vp = viewer.viewport.pointFromPixel(event.position);
       drawPoints.push({ x: vp.x, y: vp.y });
       redraw();
-      // Dessiner le trait en cours
       drawLiveStroke();
     });
 
     viewer.addHandler('canvas-release', (event) => {
-      if (!isDrawing || activeTool !== 'draw') return;
+      if (!isDrawing || (activeTool !== 'draw' && activeTool !== 'eraser')) return;
       isDrawing = false;
       if (drawPoints.length > 2) {
-        addFreeDrawAnnotation(drawPoints);
+        addFreeDrawAnnotation(drawPoints, activeTool === 'eraser');
       }
       drawPoints = [];
       redraw();
@@ -313,6 +322,32 @@ const Annotations = (() => {
         const vp = viewer.viewport.pointFromPixel(event.position);
         textBoxStart = { x: vp.x, y: vp.y };
         textBoxEnd = null;
+        return;
+      }
+      // Outil forme : début du drag
+      if (activeTool && activeTool.startsWith('shape-')) {
+        event.preventDefaultAction = true;
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        shapeStart = { x: vp.x, y: vp.y };
+        shapeEnd = null;
+        return;
+      }
+      // Pipette : lire la couleur
+      if (activeTool === 'pipette') {
+        event.preventDefaultAction = true;
+        const canvas = document.getElementById('annotation-canvas');
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          const rect = canvas.getBoundingClientRect();
+          const px = event.position.x;
+          const py = event.position.y;
+          const pixel = ctx.getImageData(px, py, 1, 1).data;
+          if (pixel[3] > 0) {
+            drawColor = `rgb(${pixel[0]},${pixel[1]},${pixel[2]})`;
+            updatePaintColorUI();
+          }
+        }
+        setActiveTool(null);
         return;
       }
       if (!selectedAnnot && !editingSticker) return;
@@ -367,6 +402,15 @@ const Annotations = (() => {
         redraw();
         return;
       }
+      // Drag pour dessiner une forme
+      if (activeTool && activeTool.startsWith('shape-') && shapeStart) {
+        event.preventDefaultAction = true;
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        shapeEnd = { x: vp.x, y: vp.y };
+        redraw();
+        drawShapePreview();
+        return;
+      }
       if (!isDraggingAnnot && !isResizingAnnot) return;
       event.preventDefaultAction = true;
 
@@ -407,6 +451,17 @@ const Annotations = (() => {
         openTextBoxEditor(textBoxStart, textBoxEnd);
         textBoxStart = null;
         textBoxEnd = null;
+        setActiveTool(null);
+        return;
+      }
+      // Fin de forme
+      if (activeTool && activeTool.startsWith('shape-') && shapeStart) {
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        if (!shapeEnd) shapeEnd = vp;
+        const shapeType = activeTool.replace('shape-', '');
+        addShapeAnnotation(shapeType, shapeStart, shapeEnd);
+        shapeStart = null;
+        shapeEnd = null;
         setActiveTool(null);
         return;
       }
@@ -463,6 +518,10 @@ const Annotations = (() => {
     hideStatusMessage();
     document.querySelectorAll('.tool-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tool === tool || (tool === null && btn.dataset.tool === 'pointer'));
+    });
+    // Sync paint toolbar
+    document.querySelectorAll('[data-paint-tool]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.paintTool === tool || (tool === null && btn.dataset.paintTool === 'pointer'));
     });
 
     // Activer la baguette magique
@@ -995,15 +1054,17 @@ const Annotations = (() => {
   /**
    * Ajouter un dessin libre (suite de points)
    */
-  function addFreeDrawAnnotation(points) {
+  function addFreeDrawAnnotation(points, isEraser) {
     const annotation = {
       id: nextId++,
       type: 'freedraw',
       x: points[0].x,
       y: points[0].y,
       points: points.map(p => ({ x: p.x, y: p.y })),
-      color: '#ffffff',
-      label: 'Dessin libre',
+      color: drawColor,
+      lineWidth: brushSize,
+      eraser: isEraser || false,
+      label: isEraser ? 'Gomme' : 'Dessin libre',
     };
     pushUndo();
     annotations.push(annotation);
@@ -1020,10 +1081,13 @@ const Annotations = (() => {
     const canvas = document.getElementById('annotation-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const isEraser = activeTool === 'eraser';
 
+    ctx.save();
+    if (isEraser) ctx.globalCompositeOperation = 'destination-out';
     ctx.beginPath();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = isEraser ? 'rgba(0,0,0,1)' : drawColor;
+    ctx.lineWidth = brushSize;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
@@ -1034,6 +1098,7 @@ const Annotations = (() => {
       ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
+    ctx.restore();
   }
 
   /**
@@ -1385,8 +1450,9 @@ const Annotations = (() => {
       case 'text': return 'T';
       case 'marker': return a.symbol || '●';
       case 'line': return '━';
-      case 'freedraw': return '✏';
+      case 'freedraw': return a.eraser ? '🧹' : '✏';
       case 'image': return '🚂';
+      case 'shape': return { line: '╱', arrow: '→', rect: '▭', ellipse: '◯', triangle: '△', star: '☆' }[a.shapeType] || '◇';
       default: return '●';
     }
   }
@@ -1550,6 +1616,9 @@ const Annotations = (() => {
           break;
         case 'image':
           drawImageAnnotation(ctx, screen, a);
+          break;
+        case 'shape':
+          drawShape(ctx, a);
           break;
       }
       ctx.globalAlpha = 1;
@@ -1832,8 +1901,9 @@ const Annotations = (() => {
   function drawFreeDraw(ctx, annotation) {
     if (!annotation.points || annotation.points.length < 2) return;
     ctx.save();
-    ctx.strokeStyle = annotation.color;
-    ctx.lineWidth = 2;
+    if (annotation.eraser) ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = annotation.eraser ? 'rgba(0,0,0,1)' : annotation.color;
+    ctx.lineWidth = annotation.lineWidth || 2;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -2949,6 +3019,190 @@ const Annotations = (() => {
     originalRedraw();
     if (legendVisible) refreshLegend();
   };
+
+  // === FORMES ===
+
+  function addShapeAnnotation(shapeType, start, end) {
+    const annotation = {
+      id: nextId++,
+      type: 'shape',
+      shapeType: shapeType,
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+      x1: start.x, y1: start.y,
+      x2: end.x, y2: end.y,
+      color: drawColor,
+      lineWidth: brushSize,
+      label: shapeType,
+    };
+    pushUndo();
+    annotations.push(annotation);
+    redraw();
+    saveToLocalStorage();
+    return annotation;
+  }
+
+  function drawShapePath(ctx, shapeType, sx1, sy1, sx2, sy2) {
+    const cx = (sx1 + sx2) / 2, cy = (sy1 + sy2) / 2;
+    const w = Math.abs(sx2 - sx1), h = Math.abs(sy2 - sy1);
+    const left = Math.min(sx1, sx2), top = Math.min(sy1, sy2);
+
+    switch (shapeType) {
+      case 'line':
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        break;
+      case 'arrow':
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        // Pointe de flèche
+        const angle = Math.atan2(sy2 - sy1, sx2 - sx1);
+        const headLen = Math.min(15, Math.hypot(sx2 - sx1, sy2 - sy1) * 0.3);
+        ctx.moveTo(sx2, sy2);
+        ctx.lineTo(sx2 - headLen * Math.cos(angle - 0.4), sy2 - headLen * Math.sin(angle - 0.4));
+        ctx.moveTo(sx2, sy2);
+        ctx.lineTo(sx2 - headLen * Math.cos(angle + 0.4), sy2 - headLen * Math.sin(angle + 0.4));
+        break;
+      case 'rect':
+        ctx.rect(left, top, w, h);
+        break;
+      case 'ellipse':
+        ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+        break;
+      case 'triangle':
+        ctx.moveTo(cx, top);
+        ctx.lineTo(left, top + h);
+        ctx.lineTo(left + w, top + h);
+        ctx.closePath();
+        break;
+      case 'star': {
+        const spikes = 5, outerR = Math.min(w, h) / 2, innerR = outerR * 0.4;
+        for (let i = 0; i < spikes * 2; i++) {
+          const r = i % 2 === 0 ? outerR : innerR;
+          const a = (Math.PI / 2 * -1) + (Math.PI / spikes) * i;
+          const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        break;
+      }
+    }
+  }
+
+  function drawShape(ctx, annotation) {
+    const s1 = Viewer.schemaToScreen(annotation.x1, annotation.y1);
+    const s2 = Viewer.schemaToScreen(annotation.x2, annotation.y2);
+    ctx.save();
+    ctx.strokeStyle = annotation.color;
+    ctx.lineWidth = annotation.lineWidth || brushSize;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    drawShapePath(ctx, annotation.shapeType, s1.x, s1.y, s2.x, s2.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawShapePreview() {
+    if (!shapeStart || !shapeEnd) return;
+    const canvas = document.getElementById('annotation-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const s1 = Viewer.schemaToScreen(shapeStart.x, shapeStart.y);
+    const s2 = Viewer.schemaToScreen(shapeEnd.x, shapeEnd.y);
+    const shapeType = activeTool.replace('shape-', '');
+    ctx.save();
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth = brushSize;
+    ctx.setLineDash([5, 3]);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    drawShapePath(ctx, shapeType, s1.x, s1.y, s2.x, s2.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // === PALETTE COULEURS ===
+
+  const PAINT_COLORS = [
+    '#000000','#808080','#800000','#ff0000','#ff6600','#ffaa00','#ffff00','#80ff00','#00ff00','#00ffaa',
+    '#ffffff','#c0c0c0','#800080','#ff00ff','#ff69b4','#4040ff','#0080ff','#00ffff','#008080','#004080',
+  ];
+
+  function updatePaintColorUI() {
+    const c1 = document.getElementById('paint-color1');
+    const c2 = document.getElementById('paint-color2');
+    if (c1) c1.style.background = drawColor;
+    if (c2) c2.style.background = drawColor2;
+  }
+
+  function initPaintToolbar() {
+    // Palette
+    const palette = document.querySelector('.paint-palette');
+    if (palette) {
+      PAINT_COLORS.forEach(c => {
+        const swatch = document.createElement('button');
+        swatch.className = 'paint-swatch';
+        swatch.style.background = c;
+        swatch.addEventListener('click', () => {
+          drawColor = c;
+          updatePaintColorUI();
+        });
+        swatch.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          drawColor2 = c;
+          updatePaintColorUI();
+        });
+        palette.appendChild(swatch);
+      });
+    }
+
+    // Color indicators
+    const c1 = document.getElementById('paint-color1');
+    const c2 = document.getElementById('paint-color2');
+    const colorInput = document.getElementById('paint-color-input');
+    let colorTarget = 1;
+    if (c1 && colorInput) {
+      c1.addEventListener('click', () => { colorTarget = 1; colorInput.value = drawColor; colorInput.click(); });
+    }
+    if (c2 && colorInput) {
+      c2.addEventListener('click', () => { colorTarget = 2; colorInput.value = drawColor2; colorInput.click(); });
+    }
+    if (colorInput) {
+      colorInput.addEventListener('input', () => {
+        if (colorTarget === 1) { drawColor = colorInput.value; }
+        else { drawColor2 = colorInput.value; }
+        updatePaintColorUI();
+      });
+    }
+
+    // Undo/Redo
+    const undoBtn = document.getElementById('paint-undo');
+    const redoBtn = document.getElementById('paint-redo');
+    if (undoBtn) undoBtn.addEventListener('click', () => undo());
+    if (redoBtn) redoBtn.addEventListener('click', () => redo());
+
+    // Tool buttons
+    document.querySelectorAll('[data-paint-tool]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.dataset.paintTool;
+        setActiveTool(tool === 'pointer' ? null : tool);
+        // Update active state on paint toolbar
+        document.querySelectorAll('[data-paint-tool]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // Thickness
+    document.querySelectorAll('.paint-thickness').forEach(btn => {
+      btn.addEventListener('click', () => {
+        brushSize = parseInt(btn.dataset.thickness) || 3;
+        document.querySelectorAll('.paint-thickness').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  }
 
   return {
     init,

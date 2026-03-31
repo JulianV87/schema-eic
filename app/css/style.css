@@ -1336,3 +1336,98 @@ html, body {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* Paint Toolbar */
+#paint-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 4px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.paint-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+}
+.paint-section-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.paint-section-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+.paint-shapes-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px !important;
+}
+.paint-divider {
+  width: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.paint-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.1s;
+}
+.paint-btn:hover {
+  background: var(--surface2);
+  border-color: var(--border);
+}
+.paint-btn.active {
+  background: rgba(48,128,255,0.15);
+  border-color: var(--accent);
+}
+.paint-color-indicator {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #fff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.paint-color-indicator:hover {
+  border-color: var(--accent);
+}
+.paint-palette {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+}
+.paint-swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0;
+}
+.paint-swatch:hover {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+.paint-section-colors {
+  min-width: 0;
+}

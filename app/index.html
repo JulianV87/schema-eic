@@ -123,6 +123,72 @@
 
     <!-- VIEWER PRINCIPAL -->
     <div id="viewer-wrapper">
+      <!-- Paint Toolbar -->
+      <div id="paint-toolbar">
+        <!-- Annuler/Refaire -->
+        <div class="paint-section">
+          <div class="paint-section-buttons">
+            <button class="paint-btn" id="paint-undo" title="Annuler (Ctrl+Z)">↩</button>
+            <button class="paint-btn" id="paint-redo" title="Refaire (Ctrl+Y)">↪</button>
+          </div>
+          <span class="paint-section-label">Historique</span>
+        </div>
+        <div class="paint-divider"></div>
+
+        <!-- Outils -->
+        <div class="paint-section">
+          <div class="paint-section-buttons">
+            <button class="paint-btn active" data-paint-tool="pointer" title="Sélection">🖱</button>
+            <button class="paint-btn" data-paint-tool="draw" title="Crayon">✏</button>
+            <button class="paint-btn" data-paint-tool="eraser" title="Gomme">🧹</button>
+            <button class="paint-btn" data-paint-tool="text" title="Texte">T</button>
+            <button class="paint-btn" data-paint-tool="pipette" title="Pipette">💉</button>
+          </div>
+          <span class="paint-section-label">Outils</span>
+        </div>
+        <div class="paint-divider"></div>
+
+        <!-- Formes -->
+        <div class="paint-section">
+          <div class="paint-section-buttons paint-shapes-grid">
+            <button class="paint-btn" data-paint-tool="shape-line" title="Ligne">╱</button>
+            <button class="paint-btn" data-paint-tool="shape-arrow" title="Flèche">→</button>
+            <button class="paint-btn" data-paint-tool="shape-rect" title="Rectangle">▭</button>
+            <button class="paint-btn" data-paint-tool="shape-ellipse" title="Ellipse">◯</button>
+            <button class="paint-btn" data-paint-tool="shape-triangle" title="Triangle">△</button>
+            <button class="paint-btn" data-paint-tool="shape-star" title="Étoile">☆</button>
+          </div>
+          <span class="paint-section-label">Formes</span>
+        </div>
+        <div class="paint-divider"></div>
+
+        <!-- Epaisseur -->
+        <div class="paint-section">
+          <div class="paint-section-buttons">
+            <button class="paint-btn paint-thickness" data-thickness="1" title="1px"><span style="display:block;height:1px;width:18px;background:#fff;margin:auto;"></span></button>
+            <button class="paint-btn paint-thickness" data-thickness="3" title="3px"><span style="display:block;height:3px;width:18px;background:#fff;margin:auto;border-radius:1px;"></span></button>
+            <button class="paint-btn paint-thickness active" data-thickness="3" title="3px"><span style="display:block;height:3px;width:18px;background:#fff;margin:auto;border-radius:1px;"></span></button>
+            <button class="paint-btn paint-thickness" data-thickness="5" title="5px"><span style="display:block;height:5px;width:18px;background:#fff;margin:auto;border-radius:2px;"></span></button>
+            <button class="paint-btn paint-thickness" data-thickness="8" title="8px"><span style="display:block;height:8px;width:18px;background:#fff;margin:auto;border-radius:3px;"></span></button>
+          </div>
+          <span class="paint-section-label">Epaisseur</span>
+        </div>
+        <div class="paint-divider"></div>
+
+        <!-- Couleurs -->
+        <div class="paint-section paint-section-colors">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+              <div id="paint-color1" class="paint-color-indicator" style="background:#ffffff;" title="Couleur 1 (clic pour changer)"></div>
+              <div id="paint-color2" class="paint-color-indicator" style="background:#000000;" title="Couleur 2 (clic pour changer)"></div>
+              <input type="color" id="paint-color-input" value="#ffffff" style="display:none;">
+            </div>
+            <div class="paint-palette"></div>
+          </div>
+          <span class="paint-section-label">Couleurs</span>
+        </div>
+      </div>
+
       <!-- OpenSeadragon container -->
       <div id="viewer-container">
         <div id="osd-viewer"></div>
