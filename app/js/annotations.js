@@ -177,6 +177,9 @@ const Annotations = (() => {
     viewer.addHandler('canvas-click', (event) => {
       if (activeTool === 'magicwand') return;
       if (typeof Calibrate !== 'undefined' && Calibrate.isActive()) return;
+      // Ne pas intercepter les clics quand on dessine/gomme/forme/pipette
+      if (activeTool === 'draw' || activeTool === 'eraser' || activeTool === 'pipette') return;
+      if (activeTool && activeTool.startsWith('shape-')) return;
 
       const viewportPoint = viewer.viewport.pointFromPixel(event.position);
 
@@ -1946,7 +1949,7 @@ const Annotations = (() => {
   function hitTestAllAnnotations(px, py) {
     for (let i = annotations.length - 1; i >= 0; i--) {
       const a = annotations[i];
-      if (a.type === 'image') continue; // géré par hitTestImageAnnotation
+      if (a.type === 'image' || a.type === 'freedraw' || a.type === 'shape') continue;
       const s = a.scale || 1;
       const r = ANNOT_HIT_RADIUS * s;
       if (Math.abs(px - a.x) <= r && Math.abs(py - a.y) <= r) return a;
