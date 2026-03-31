@@ -701,6 +701,30 @@ const Annotations = (() => {
     });
     bar.appendChild(sizeUp);
 
+    // Couleur
+    const colorLabel = document.createElement('span');
+    colorLabel.style.cssText = 'color:var(--muted);';
+    colorLabel.textContent = 'Couleur';
+    bar.appendChild(colorLabel);
+
+    const colors = ['#ffffff','#ff4040','#ff9520','#ffdd00','#00d4a0','#3080ff','#9060ff','#ff69b4','#000000'];
+    const colorRow = document.createElement('div');
+    colorRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;justify-content:center;';
+    colors.forEach(c => {
+      const swatch = document.createElement('button');
+      swatch.style.cssText = `width:18px;height:18px;border-radius:50%;border:2px solid ${annotation.color === c ? '#fff' : 'transparent'};background:${c};cursor:pointer;padding:0;`;
+      swatch.addEventListener('click', () => {
+        pushUndo();
+        annotation.color = c;
+        redraw(); saveToLocalStorage();
+        // Mettre à jour les bordures
+        colorRow.querySelectorAll('button').forEach(b => b.style.borderColor = 'transparent');
+        swatch.style.borderColor = '#fff';
+      });
+      colorRow.appendChild(swatch);
+    });
+    bar.appendChild(colorRow);
+
     // Rotation + Miroir uniquement pour les images
     if (isImage) {
       const rotLabel = document.createElement('span');
