@@ -782,14 +782,14 @@ html, body {
   align-items: center;
   gap: 2px;
   padding: 6px 4px;
-  background: var(--surface2);
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.12s;
 }
-.tool-btn:hover { border-color: var(--border2); background: var(--surface3); }
-.tool-btn.active { border-color: var(--accent); background: rgba(48,128,255,0.1); }
+.tool-btn:hover { border-color: var(--border2); background: #e8edf4; }
+.tool-btn.active { border-color: var(--accent); background: rgba(48,128,255,0.15); }
 .tool-icon { font-size: 16px; line-height: 1; }
 .tool-label {
   font-family: var(--mono);
