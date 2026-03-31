@@ -220,9 +220,12 @@ const Annotations = (() => {
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
       }
-      // Image depuis la bibliothèque (placement d'un nouveau sticker)
+      // Image depuis la bibliothèque (placement d'un nouveau sticker — un seul puis retour curseur)
       else if (activeTool === 'image-library' && pendingImageSrc && !editingSticker) {
         addImageAnnotation(viewportPoint.x, viewportPoint.y, pendingImageSrc, pendingImageLabel);
+        pendingImageSrc = null;
+        pendingImageLabel = null;
+        setActiveTool(null);
       }
       // Texte libre
       else if (activeTool === 'text') {
@@ -1587,16 +1590,7 @@ const Annotations = (() => {
       ctx.fillText(String(annotation.number), pos.x + imgW / 2 + 8, pos.y + 3);
     }
 
-    // Label en dessous
-    if (annotation.label) {
-      ctx.font = '9px "JetBrains Mono", monospace';
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      ctx.shadowBlur = 3;
-      ctx.fillText(annotation.label, pos.x, pos.y + imgH / 2 + 12);
-      ctx.shadowBlur = 0;
-    }
+    // Label masqué pour les stickers (images sombres sur fond bleu)
   }
 
   /**
