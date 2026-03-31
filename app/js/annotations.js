@@ -20,6 +20,10 @@ const Annotations = (() => {
   let redoStack = [];
   const MAX_UNDO = 50;
 
+  // Outil texte type Paint (rectangle puis saisie)
+  let textBoxStart = null;  // viewport coords du coin début
+  let textBoxEnd = null;    // viewport coords du coin fin (pendant le drag)
+
   function pushUndo() {
     undoStack.push(JSON.stringify(annotations));
     if (undoStack.length > MAX_UNDO) undoStack.shift();
@@ -132,9 +136,15 @@ const Annotations = (() => {
     document.querySelectorAll('.tool-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const tool = btn.dataset.tool;
-        setActiveTool(tool === activeTool ? null : tool);
+        if (tool) setActiveTool(tool === activeTool ? null : tool);
       });
     });
+
+    // Boutons Annuler / Refaire
+    const btnUndo = document.getElementById('btn-undo');
+    const btnRedo = document.getElementById('btn-redo');
+    if (btnUndo) btnUndo.addEventListener('click', () => undo());
+    if (btnRedo) btnRedo.addEventListener('click', () => redo());
 
     // Drag & drop de stickers sur le viewer
     const osdEl = document.getElementById('osd-viewer');
@@ -232,11 +242,10 @@ const Annotations = (() => {
         pendingImageLabel = null;
         setActiveTool(null);
       }
-      // Texte libre
+      // Texte libre — premier clic = début du rectangle
       else if (activeTool === 'text') {
-        const text = prompt('Texte :');
-        if (text) addTextAnnotation(viewportPoint.x, viewportPoint.y, text);
-        setActiveTool(null);
+        textBoxStart = { x: viewportPoint.x, y: viewportPoint.y };
+        textBoxEnd = null;
       }
       // Annotations custom (symbole/point ou ligne)
       else if (activeTool && activeTool.startsWith('custom-')) {
@@ -348,6 +357,14 @@ const Annotations = (() => {
     });
 
     viewer.addHandler('canvas-drag', (event) => {
+      // Drag pour dessiner le rectangle de texte
+      if (activeTool === 'text' && textBoxStart) {
+        event.preventDefaultAction = true;
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        textBoxEnd = { x: vp.x, y: vp.y };
+        redraw();
+        return;
+      }
       if (!isDraggingAnnot && !isResizingAnnot) return;
       event.preventDefaultAction = true;
 
@@ -381,6 +398,16 @@ const Annotations = (() => {
     });
 
     viewer.addHandler('canvas-release', (event) => {
+      // Fin du rectangle de texte → ouvrir le textarea
+      if (activeTool === 'text' && textBoxStart) {
+        const vp = viewer.viewport.pointFromPixel(event.position);
+        if (!textBoxEnd) textBoxEnd = vp;
+        openTextBoxEditor(textBoxStart, textBoxEnd);
+        textBoxStart = null;
+        textBoxEnd = null;
+        setActiveTool(null);
+        return;
+      }
       if (isDraggingAnnot || isResizingAnnot) {
         isDraggingAnnot = false;
         isResizingAnnot = false;
@@ -520,7 +547,7 @@ const Annotations = (() => {
   /**
    * Ajouter un texte libre
    */
-  function addTextAnnotation(x, y, text) {
+  function addTextAnnotation(x, y, text, vpW, vpH) {
     const annotation = {
       id: nextId++,
       type: 'text',
@@ -528,12 +555,70 @@ const Annotations = (() => {
       y: y,
       text: text,
       color: '#ffffff',
+      vpW: vpW || 0,
+      vpH: vpH || 0,
     };
     pushUndo();
     annotations.push(annotation);
     redraw();
     saveToLocalStorage();
     return annotation;
+  }
+
+  /**
+   * Ouvrir un textarea par-dessus le schéma aux coordonnées du rectangle dessiné
+   */
+  function openTextBoxEditor(vpStart, vpEnd) {
+    const viewer = Viewer.getMainViewer();
+    if (!viewer) return;
+
+    const x1 = Math.min(vpStart.x, vpEnd.x);
+    const y1 = Math.min(vpStart.y, vpEnd.y);
+    const x2 = Math.max(vpStart.x, vpEnd.x);
+    const y2 = Math.max(vpStart.y, vpEnd.y);
+    const vpW = Math.max(x2 - x1, 0.005);
+    const vpH = Math.max(y2 - y1, 0.003);
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+
+    // Convertir en pixels écran
+    const sp1 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(x1, y1));
+    const sp2 = viewer.viewport.viewportToViewerElementCoordinates(new OpenSeadragon.Point(x2, y2));
+    const viewerEl = document.getElementById('osd-viewer');
+    const vrect = viewerEl.getBoundingClientRect();
+
+    const old = document.getElementById('text-box-editor');
+    if (old) old.remove();
+
+    const ta = document.createElement('textarea');
+    ta.id = 'text-box-editor';
+    ta.placeholder = 'Saisir le texte...';
+    ta.style.cssText = `
+      position:fixed;
+      left:${vrect.left + sp1.x}px; top:${vrect.top + sp1.y}px;
+      width:${sp2.x - sp1.x}px; height:${sp2.y - sp1.y}px;
+      min-width:60px; min-height:24px;
+      background:rgba(0,0,0,0.75); color:#fff;
+      border:2px solid #3080ff; border-radius:3px;
+      font-family:'JetBrains Mono',monospace; font-size:12px;
+      padding:4px 6px; resize:both; z-index:400; outline:none;
+      overflow:auto;
+    `;
+    document.body.appendChild(ta);
+    ta.focus();
+
+    const confirm = () => {
+      const text = ta.value.trim();
+      if (text) addTextAnnotation(cx, cy, text, vpW, vpH);
+      ta.remove();
+      redraw();
+    };
+
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirm(); }
+      if (e.key === 'Escape') { ta.remove(); redraw(); }
+    });
+    ta.addEventListener('blur', () => { setTimeout(() => { if (document.getElementById('text-box-editor')) confirm(); }, 100); });
   }
 
   /**
@@ -1298,6 +1383,25 @@ const Annotations = (() => {
           break;
       }
     });
+
+    // Rectangle de texte en cours de dessin
+    if (textBoxStart && textBoxEnd) {
+      const viewer = Viewer.getMainViewer();
+      if (viewer) {
+        const p1 = viewer.viewport.viewportToViewerElementCoordinates(
+          new OpenSeadragon.Point(Math.min(textBoxStart.x, textBoxEnd.x), Math.min(textBoxStart.y, textBoxEnd.y)));
+        const p2 = viewer.viewport.viewportToViewerElementCoordinates(
+          new OpenSeadragon.Point(Math.max(textBoxStart.x, textBoxEnd.x), Math.max(textBoxStart.y, textBoxEnd.y)));
+        ctx.save();
+        ctx.strokeStyle = '#3080ff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.fillStyle = 'rgba(48,128,255,0.08)';
+        ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+        ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+        ctx.restore();
+      }
+    }
   }
 
   // Polyfill roundRect pour navigateurs anciens
@@ -1390,21 +1494,66 @@ const Annotations = (() => {
 
   function drawText(ctx, pos, annotation) {
     const s = annotation.scale || 1;
+    const viewer = Viewer.getMainViewer();
     ctx.save();
     ctx.translate(pos.x, pos.y);
     ctx.scale(s, s);
-    ctx.font = '12px "JetBrains Mono", monospace';
-    const metrics = ctx.measureText(annotation.text);
-    const padding = 4;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    roundRect(ctx, -padding, -12, metrics.width + padding * 2, 18, 3);
-    ctx.fill();
+    // Si l'annotation a des dimensions de rectangle
+    if (annotation.vpW && annotation.vpH && viewer) {
+      const topLeft = viewer.viewport.viewportToViewerElementCoordinates(
+        new OpenSeadragon.Point(annotation.x - annotation.vpW / 2, annotation.y - annotation.vpH / 2));
+      const botRight = viewer.viewport.viewportToViewerElementCoordinates(
+        new OpenSeadragon.Point(annotation.x + annotation.vpW / 2, annotation.y + annotation.vpH / 2));
+      const w = (botRight.x - topLeft.x) / s;
+      const h = (botRight.y - topLeft.y) / s;
 
-    ctx.fillStyle = annotation.color;
-    ctx.fillText(annotation.text, 0, 0);
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath();
+      roundRect(ctx, -w / 2, -h / 2, w, h, 3);
+      ctx.fill();
+
+      // Dessiner le texte avec retour à la ligne
+      ctx.fillStyle = annotation.color;
+      ctx.font = '12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      const lines = wrapText(ctx, annotation.text, w - 8);
+      const lineH = 15;
+      const startY = -h / 2 + 14;
+      lines.forEach((line, i) => {
+        ctx.fillText(line, -w / 2 + 4, startY + i * lineH);
+      });
+    } else {
+      // Fallback : ancien affichage simple
+      ctx.font = '12px "JetBrains Mono", monospace';
+      const metrics = ctx.measureText(annotation.text);
+      const padding = 4;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath();
+      roundRect(ctx, -padding, -12, metrics.width + padding * 2, 18, 3);
+      ctx.fill();
+      ctx.fillStyle = annotation.color;
+      ctx.fillText(annotation.text, 0, 0);
+    }
     ctx.restore();
+  }
+
+  // Utilitaire retour à la ligne
+  function wrapText(ctx, text, maxWidth) {
+    const words = text.split(/\s+/);
+    const lines = [];
+    let current = '';
+    for (const word of words) {
+      const test = current ? current + ' ' + word : word;
+      if (ctx.measureText(test).width > maxWidth && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length ? lines : [''];
   }
 
   function drawMarker(ctx, pos, annotation) {
