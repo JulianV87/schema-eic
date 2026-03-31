@@ -678,24 +678,26 @@ const Annotations = (() => {
     bar.appendChild(sizeLabel);
 
     const sizeDown = createEditBtn('−', () => {
+      pushUndo();
       if (isImage) {
         annotation.vpW *= 0.8;
         annotation.vpH *= 0.8;
       } else {
         annotation.scale = (annotation.scale || 1) * 0.8;
       }
-      redraw();
+      redraw(); saveToLocalStorage();
     });
     bar.appendChild(sizeDown);
 
     const sizeUp = createEditBtn('+', () => {
+      pushUndo();
       if (isImage) {
         annotation.vpW *= 1.25;
         annotation.vpH *= 1.25;
       } else {
         annotation.scale = (annotation.scale || 1) * 1.25;
       }
-      redraw();
+      redraw(); saveToLocalStorage();
     });
     bar.appendChild(sizeUp);
 
@@ -707,20 +709,23 @@ const Annotations = (() => {
       bar.appendChild(rotLabel);
 
       const rotLeft = createEditBtn('↶', () => {
+        pushUndo();
         annotation.rotation = (annotation.rotation || 0) - 15;
-        redraw();
+        redraw(); saveToLocalStorage();
       });
       bar.appendChild(rotLeft);
 
       const rotRight = createEditBtn('↷', () => {
+        pushUndo();
         annotation.rotation = (annotation.rotation || 0) + 15;
-        redraw();
+        redraw(); saveToLocalStorage();
       });
       bar.appendChild(rotRight);
 
       const mirrorBtn = createEditBtn('⇔ Miroir', () => {
+        pushUndo();
         annotation.mirrorX = !annotation.mirrorX;
-        redraw();
+        redraw(); saveToLocalStorage();
       });
       bar.appendChild(mirrorBtn);
     }
