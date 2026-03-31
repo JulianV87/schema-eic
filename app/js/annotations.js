@@ -829,7 +829,7 @@ const Annotations = (() => {
         if (a.type === 'image' && a.src) {
           const thumb = document.createElement('img');
           thumb.src = a.src;
-          thumb.style.cssText = 'height:16px;width:auto;flex-shrink:0;background:#fff;border-radius:2px;padding:1px;';
+          thumb.style.cssText = 'height:22px;width:auto;flex-shrink:0;background:#fff;border-radius:3px;padding:2px;';
           labelSpan.appendChild(thumb);
           const txt = document.createElement('span');
           txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
@@ -1015,7 +1015,7 @@ const Annotations = (() => {
       if (a.type === 'image' && a.src) {
         const thumb = document.createElement('img');
         thumb.src = a.src;
-        thumb.style.cssText = 'height:16px;width:auto;flex-shrink:0;background:#fff;border-radius:2px;padding:1px;';
+        thumb.style.cssText = 'height:22px;width:auto;flex-shrink:0;background:#fff;border-radius:3px;padding:2px;';
         labelSpan.appendChild(thumb);
         const txt = document.createElement('span');
         txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
