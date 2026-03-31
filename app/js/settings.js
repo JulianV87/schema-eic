@@ -1639,7 +1639,7 @@ const Settings = (() => {
         row.addEventListener('mouseleave', () => row.style.background = 'none');
 
         const icon = document.createElement('span');
-        icon.style.cssText = 'flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;';
+        icon.style.cssText = 'flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:3px;';
         if (sticker.imageSrc) {
           icon.innerHTML = '<img src="' + sticker.imageSrc + '" style="max-height:24px;max-width:28px;object-fit:contain;">';
         }
@@ -1846,7 +1846,7 @@ const Settings = (() => {
 
       library.forEach((img, i) => {
         const card = document.createElement('div');
-        card.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
+        card.style.cssText = 'background:#fff;border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
 
         const imgEl = document.createElement('img');
         imgEl.src = img.dataUrl;
