@@ -340,8 +340,12 @@ const SchemaUpdate = (() => {
     let changedBlocks = null;
     let isFullRegen = false;
 
-    if (oldPreviewResult && oldPreviewResult.fromSupabase) {
-      // Preview existant dans Supabase → comparaison partielle possible
+    // Vérifier si un upload complet a déjà réussi auparavant
+    const prevMeta = Store.getJSON('eic_schema_meta', null);
+    const prevFullUploadDone = prevMeta && prevMeta.complete === true;
+
+    if (oldPreviewResult && oldPreviewResult.fromSupabase && prevFullUploadDone) {
+      // Upload complet précédent confirmé → comparaison partielle possible
       const oldResized = resizeCanvas(oldPreviewResult.canvas, W, H);
       changedBlocks = compareBlocks(oldResized, newCanvas);
       log('Blocs modifies: ' + changedBlocks.length);
@@ -356,10 +360,8 @@ const SchemaUpdate = (() => {
         log('  [' + b.left + ',' + b.top + '] ' + b.width + 'x' + b.height + ' — ' + b.pct + '% modifie');
       });
     } else {
-      // Pas de preview dans Supabase → premier upload, generation complete obligatoire
-      log(oldPreviewResult
-        ? 'Premier upload vers Supabase — generation complete (les tuiles locales ne sont pas dans le cloud)'
-        : 'Pas d\'ancien schema trouve — generation complete');
+      // Pas d'upload complet précédent → generation complete obligatoire
+      log('Generation complete de toutes les tuiles vers Supabase...');
       isFullRegen = true;
     }
 
@@ -470,6 +472,7 @@ const SchemaUpdate = (() => {
       updated: new Date().toISOString(),
       width: W,
       height: H,
+      complete: true,
     });
 
     log('');
