@@ -568,9 +568,10 @@ const SchemaUpdate = (() => {
     const fullH = Math.floor(viewport.height * scale);
     const totalPixels = fullW * fullH;
 
-    const MAX_SINGLE_CANVAS = 80_000_000; // 80M px — limite canvas unique
+    const MAX_SINGLE_CANVAS = 50_000_000; // 50M px — limite safe Firefox
+    const MAX_CANVAS_DIM = 16384;        // max pixels par côté (texture GPU)
 
-    if (totalPixels <= MAX_SINGLE_CANVAS) {
+    if (totalPixels <= MAX_SINGLE_CANVAS && fullW <= MAX_CANVAS_DIM && fullH <= MAX_CANVAS_DIM) {
       // Image assez petite → rendu direct en un seul canvas
       log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px (canvas unique)');
       const canvas = document.createElement('canvas');
@@ -629,7 +630,7 @@ const SchemaUpdate = (() => {
    */
   async function processUpdate(file, progressCb) {
     const progress = progressCb || (() => {});
-    const DPI_STAGES = [100, 200, 300];
+    const DPI_STAGES = [72, 150, 300];
 
     for (let i = 0; i < DPI_STAGES.length; i++) {
       const dpi = DPI_STAGES[i];
