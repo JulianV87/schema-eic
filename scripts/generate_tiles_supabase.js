@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
+sharp.limitInputPixels(false); // Désactiver la limite de pixels (image 300 DPI = 580M px)
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://fbcwsgqrwolxnqpasbgl.supabase.co';
 const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_KEY || '').replace(/\s+/g, '');
