@@ -340,24 +340,20 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Upload un fichier vers Supabase Storage
+   * Upload un fichier vers Supabase Storage avec retries
    */
-  async function uploadToStorage(path, blob, contentType) {
+  async function uploadToStorage(path, blob, contentType, retries) {
+    const maxRetries = retries || 3;
     const url = SUPABASE_URL + '/storage/v1/object/' + STORAGE_BUCKET + '/' + path;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        ...headers(),
-        'Content-Type': contentType || 'application/octet-stream',
-        'x-upsert': 'true',
-      },
-      body: blob,
-    });
-    if (!resp.ok) {
-      // Peut-être que le bucket n'existe pas encore, essayer de le créer
-      if (resp.status === 404 || resp.status === 400) {
-        await ensureBucket();
-        const retry = await fetch(url, {
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Attendre avant de réessayer (backoff exponentiel)
+          await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+        }
+
+        const resp = await fetch(url, {
           method: 'POST',
           headers: {
             ...headers(),
@@ -366,12 +362,31 @@ const SchemaUpdate = (() => {
           },
           body: blob,
         });
-        if (!retry.ok) throw new Error('Upload echoue: ' + path + ' (' + retry.status + ')');
-        return;
+
+        if (resp.ok) return;
+
+        // Bucket inexistant → le créer et réessayer
+        if ((resp.status === 404 || resp.status === 400) && attempt === 0) {
+          await ensureBucket();
+          continue;
+        }
+
+        // Rate limit → réessayer
+        if (resp.status === 429) continue;
+
+        // Autre erreur au dernier essai
+        if (attempt === maxRetries - 1) {
+          throw new Error('Upload echoue: ' + path + ' (' + resp.status + ')');
+        }
+      } catch (e) {
+        if (attempt === maxRetries - 1) throw e;
+        // Erreur réseau → réessayer
       }
-      throw new Error('Upload echoue: ' + path + ' (' + resp.status + ')');
     }
   }
+
+  /** Petite pause pour éviter le rate limiting */
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   /**
    * Créer le bucket Supabase Storage si nécessaire
@@ -534,19 +549,21 @@ const SchemaUpdate = (() => {
           batch.push(uploadToStorage(tilePath, blob, 'image/jpeg'));
           totalRegenerated++;
 
-          // Flush par batch de 6
-          if (batch.length >= 6) {
+          // Flush par batch de 3 avec délai (éviter rate limiting Supabase)
+          if (batch.length >= 3) {
             await Promise.all(batch);
             batch.length = 0;
+            await sleep(100);
 
             // Estimation du temps restant
             const elapsed = (Date.now() - startTime) / 1000;
-            const rate = processed / elapsed;
-            const remaining = Math.round((totalTiles - processed) / rate);
+            const rate = totalRegenerated / elapsed;
+            const tilesLeft = (isFullRegen ? totalTiles : totalTiles) - processed;
+            const remaining = rate > 0 ? Math.round(tilesLeft / rate) : 0;
             const mins = Math.floor(remaining / 60);
             const secs = remaining % 60;
             const eta = mins > 0 ? mins + 'min ' + secs + 's' : secs + 's';
-            progress('tiles', 'Tuiles: ' + totalRegenerated + ' uploadees — Restant: ~' + eta, processed / totalTiles);
+            progress('tiles', 'Tuiles: ' + totalRegenerated + ' / ~' + totalTiles + ' — Restant: ~' + eta, processed / totalTiles);
           }
         }
       }
