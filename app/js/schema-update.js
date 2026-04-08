@@ -132,20 +132,21 @@ const SchemaUpdate = (() => {
 
   /**
    * Charger l'ancien schéma preview en canvas
+   * Retourne { canvas, fromSupabase } ou null
    */
   async function loadOldPreview() {
     // Essayer Supabase Storage d'abord, puis local
-    const urls = [
-      SUPABASE_URL + '/storage/v1/object/public/' + STORAGE_BUCKET + '/schema_preview.png',
-      '/tiles/schema_preview.png',
+    const sources = [
+      { url: SUPABASE_URL + '/storage/v1/object/public/' + STORAGE_BUCKET + '/schema_preview.png', supabase: true },
+      { url: '/tiles/schema_preview.png', supabase: false },
     ];
 
-    for (const url of urls) {
+    for (const src of sources) {
       try {
-        const resp = await fetch(url, { method: 'HEAD' });
+        const resp = await fetch(src.url, { method: 'HEAD' });
         if (!resp.ok) continue;
 
-        return new Promise((resolve, reject) => {
+        const canvas = await new Promise((resolve, reject) => {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => {
@@ -156,8 +157,9 @@ const SchemaUpdate = (() => {
             resolve(c);
           };
           img.onerror = reject;
-          img.src = url;
+          img.src = src.url;
         });
+        return { canvas, fromSupabase: src.supabase };
       } catch { /* try next */ }
     }
     return null;
@@ -333,14 +335,14 @@ const SchemaUpdate = (() => {
 
     // 2. Charger l'ancien preview et comparer
     progress('compare', 'Comparaison avec l\'ancien schema...');
-    const oldPreview = await loadOldPreview();
+    const oldPreviewResult = await loadOldPreview();
 
     let changedBlocks = null;
     let isFullRegen = false;
 
-    if (oldPreview) {
-      // Redimensionner le preview à la taille du nouveau pour comparer
-      const oldResized = resizeCanvas(oldPreview, W, H);
+    if (oldPreviewResult && oldPreviewResult.fromSupabase) {
+      // Preview existant dans Supabase → comparaison partielle possible
+      const oldResized = resizeCanvas(oldPreviewResult.canvas, W, H);
       changedBlocks = compareBlocks(oldResized, newCanvas);
       log('Blocs modifies: ' + changedBlocks.length);
 
@@ -354,7 +356,10 @@ const SchemaUpdate = (() => {
         log('  [' + b.left + ',' + b.top + '] ' + b.width + 'x' + b.height + ' — ' + b.pct + '% modifie');
       });
     } else {
-      log('Pas d\'ancien schema trouve — generation complete');
+      // Pas de preview dans Supabase → premier upload, generation complete obligatoire
+      log(oldPreviewResult
+        ? 'Premier upload vers Supabase — generation complete (les tuiles locales ne sont pas dans le cloud)'
+        : 'Pas d\'ancien schema trouve — generation complete');
       isFullRegen = true;
     }
 
