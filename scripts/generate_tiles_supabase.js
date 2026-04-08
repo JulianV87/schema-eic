@@ -203,6 +203,13 @@ function createContext(w, h) {
 async function main() {
   console.log('=== Génération des tuiles Deep Zoom (Supabase) ===\n');
 
+  // 0. Set status to processing
+  await supabaseUpdateConfig('eic_schema_status', {
+    status: 'processing',
+    started: new Date().toISOString(),
+  });
+  console.log('Statut: processing\n');
+
   // 1. Download PDF
   console.log('Téléchargement du PDF depuis Supabase Storage...');
   const pdfUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/schema_update.pdf`;
