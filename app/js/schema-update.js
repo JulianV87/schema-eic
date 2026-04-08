@@ -583,16 +583,13 @@ const SchemaUpdate = (() => {
       const scaledViewport = page.getViewport({ scale });
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
 
-      // Copier les pixels dans un canvas NEUF (pdf.js corrompt le canvas original
-      // rendant drawImage impossible dans Firefox malgré des pixels valides)
+      // Extraire les pixels et créer un ImageBitmap (évite tout problème
+      // de canvas corrompu/vide — ImageBitmap est géré indépendamment)
       const imageData = ctx.getImageData(0, 0, fullW, fullH);
-      canvas.width = 1; canvas.height = 1; // libérer l'original
-      const cleanCanvas = document.createElement('canvas');
-      cleanCanvas.width = fullW;
-      cleanCanvas.height = fullH;
-      cleanCanvas.getContext('2d').putImageData(imageData, 0, 0);
-      log('Rendu termine');
-      return { strips: [{ x: 0, width: fullW, canvas: cleanCanvas }], width: fullW, height: fullH };
+      canvas.width = 1; canvas.height = 1; // libérer le canvas original
+      const bitmap = await createImageBitmap(imageData);
+      log('Rendu termine (' + fullW + 'x' + fullH + ')');
+      return { strips: [{ x: 0, width: fullW, canvas: bitmap }], width: fullW, height: fullH };
     }
 
     // Image trop grande → rendu par bandes verticales
@@ -616,15 +613,12 @@ const SchemaUpdate = (() => {
       const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
       await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
 
-      // Copier dans un canvas neuf (pdf.js corrompt l'original)
+      // Extraire les pixels et créer un ImageBitmap
       const stripData = ctx.getImageData(0, 0, sw, fullH);
       canvas.width = 1; canvas.height = 1;
-      const cleanStrip = document.createElement('canvas');
-      cleanStrip.width = sw;
-      cleanStrip.height = fullH;
-      cleanStrip.getContext('2d').putImageData(stripData, 0, 0);
+      const stripBitmap = await createImageBitmap(stripData);
 
-      strips.push({ x: sx, width: sw, canvas: cleanStrip });
+      strips.push({ x: sx, width: sw, canvas: stripBitmap });
       log('  Bande ' + (i + 1) + '/' + numStrips);
     }
 
