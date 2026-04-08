@@ -386,6 +386,24 @@ const SchemaUpdate = (() => {
   /** Petite pause pour éviter le rate limiting */
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+  /** Vérifier qu'un canvas n'est pas vide (détecte les erreurs silencieuses) */
+  function validateCanvas(ctx, w, h) {
+    try {
+      const sample = ctx.getImageData(0, 0, Math.min(10, w), Math.min(10, h));
+      let nonWhite = 0;
+      for (let i = 0; i < sample.data.length; i += 4) {
+        if (sample.data[i] < 250 || sample.data[i + 1] < 250 || sample.data[i + 2] < 250) {
+          nonWhite++;
+        }
+      }
+      if (nonWhite === 0) {
+        log('ATTENTION: le canvas semble vide apres le rendu PDF');
+      }
+    } catch (e) {
+      log('Validation canvas: ' + e.message);
+    }
+  }
+
   /**
    * Créer le bucket Supabase Storage si nécessaire
    */
@@ -425,6 +443,67 @@ const SchemaUpdate = (() => {
     const { strips, width: W, height: H } = rendered;
     const maxLevel = Math.ceil(Math.log2(Math.max(W, H)));
 
+    // Compter les tuiles
+    let totalTiles = 0;
+    for (let level = maxLevel; level >= 0; level--) {
+      const ls = Math.pow(2, level - maxLevel);
+      totalTiles += Math.ceil(Math.max(1, Math.ceil(W * ls)) / TILE_SIZE) * Math.ceil(Math.max(1, Math.ceil(H * ls)) / TILE_SIZE);
+    }
+
+    // ============================================================
+    // PHASE 1 : Générer TOUS les blobs de tuiles en mémoire
+    // (aucun appel réseau ici — le canvas reste vivant)
+    // ============================================================
+    progress('tiles', dpi + ' DPI — Generation des tuiles...', 0);
+    log('Generation de ~' + totalTiles + ' tuiles en memoire...');
+
+    const tileBlobs = []; // { path, blob }
+    let generated = 0;
+
+    for (let level = maxLevel; level >= 0; level--) {
+      const levelScale = Math.pow(2, level - maxLevel);
+      const levelWidth = Math.max(1, Math.ceil(W * levelScale));
+      const levelHeight = Math.max(1, Math.ceil(H * levelScale));
+      const tileCols = Math.ceil(levelWidth / TILE_SIZE);
+      const tileRows = Math.ceil(levelHeight / TILE_SIZE);
+
+      const useDirectCanvas = (levelWidth * levelHeight) < 20_000_000;
+      let levelCanvas = useDirectCanvas ? createPreview(strips, W, H, levelWidth) : null;
+
+      for (let col = 0; col < tileCols; col++) {
+        for (let row = 0; row < tileRows; row++) {
+          let blob;
+          if (levelCanvas) {
+            blob = await extractTileDirect(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          } else {
+            blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          }
+          if (!blob) continue;
+
+          tileBlobs.push({ path: 'schema_files/' + level + '/' + col + '_' + row + '.jpeg', blob });
+          generated++;
+
+          // Mettre à jour le progress toutes les 20 tuiles
+          if (generated % 20 === 0) {
+            progress('tiles', dpi + ' DPI — Generation: ' + generated + '/' + totalTiles, generated / totalTiles * 0.3);
+          }
+        }
+      }
+    }
+
+    log('Tuiles generees: ' + generated);
+
+    // Générer le preview aussi (avant de libérer les strips)
+    const previewCanvas = createPreview(strips, W, H, 2000);
+    const previewBlob = await new Promise(r => previewCanvas.toBlob(r, 'image/png'));
+
+    // Libérer les strips (grosse mémoire)
+    strips.length = 0;
+
+    // ============================================================
+    // PHASE 2 : Uploader tout vers Supabase
+    // (les canvas sont libérés, on n'a que des blobs légers)
+    // ============================================================
     await ensureBucket();
 
     // DZI
@@ -437,68 +516,25 @@ const SchemaUpdate = (() => {
       '</Image>';
     await uploadToStorage('schema.dzi', new Blob([dziContent], { type: 'application/xml' }), 'application/xml');
 
-    // Compter les tuiles
-    let totalTiles = 0;
-    for (let level = maxLevel; level >= 0; level--) {
-      const ls = Math.pow(2, level - maxLevel);
-      totalTiles += Math.ceil(Math.max(1, Math.ceil(W * ls)) / TILE_SIZE) * Math.ceil(Math.max(1, Math.ceil(H * ls)) / TILE_SIZE);
-    }
-
     let uploaded = 0;
-    let processed = 0;
     const startTime = Date.now();
 
-    for (let level = maxLevel; level >= 0; level--) {
-      const levelScale = Math.pow(2, level - maxLevel);
-      const levelWidth = Math.max(1, Math.ceil(W * levelScale));
-      const levelHeight = Math.max(1, Math.ceil(H * levelScale));
-      const tileCols = Math.ceil(levelWidth / TILE_SIZE);
-      const tileRows = Math.ceil(levelHeight / TILE_SIZE);
+    for (let i = 0; i < tileBlobs.length; i += 3) {
+      const batch = tileBlobs.slice(i, i + 3).map(t => uploadToStorage(t.path, t.blob, 'image/jpeg'));
+      await Promise.all(batch);
+      uploaded += batch.length;
+      await sleep(80);
 
-      const useDirectCanvas = (levelWidth * levelHeight) < 20_000_000;
-      let levelCanvas = useDirectCanvas ? createPreview(strips, W, H, levelWidth) : null;
-
-      const batch = [];
-
-      for (let col = 0; col < tileCols; col++) {
-        for (let row = 0; row < tileRows; row++) {
-          processed++;
-
-          let blob;
-          if (levelCanvas) {
-            blob = await extractTileDirect(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
-          } else {
-            blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
-          }
-          if (!blob) continue;
-
-          batch.push(uploadToStorage('schema_files/' + level + '/' + col + '_' + row + '.jpeg', blob, 'image/jpeg'));
-          uploaded++;
-
-          if (batch.length >= 3) {
-            await Promise.all(batch);
-            batch.length = 0;
-            await sleep(80);
-
-            const elapsed = (Date.now() - startTime) / 1000;
-            const elapsedStr = formatTime(Math.round(elapsed));
-            const rate = uploaded / elapsed;
-            const remaining = rate > 0 ? Math.round((totalTiles - processed) / rate) : 0;
-            const etaStr = formatTime(remaining);
-            progress('tiles', dpi + ' DPI — ' + uploaded + '/' + totalTiles + ' tuiles — ' + elapsedStr + ' ecoule — ~' + etaStr + ' restant', processed / totalTiles);
-          }
-        }
-      }
-
-      if (batch.length > 0) {
-        await Promise.all(batch);
-        batch.length = 0;
-      }
+      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsedStr = formatTime(Math.round(elapsed));
+      const rate = uploaded / elapsed;
+      const remaining = rate > 0 ? Math.round((tileBlobs.length - uploaded) / rate) : 0;
+      const etaStr = formatTime(remaining);
+      progress('tiles', dpi + ' DPI — Upload: ' + uploaded + '/' + tileBlobs.length + ' — ' + elapsedStr + ' ecoule — ~' + etaStr + ' restant',
+        0.3 + (uploaded / tileBlobs.length) * 0.7);
     }
 
-    // Preview
-    const previewCanvas = createPreview(strips, W, H, 2000);
-    const previewBlob = await new Promise(r => previewCanvas.toBlob(r, 'image/png'));
+    // Preview (déjà généré avant la libération des strips)
     await uploadToStorage('schema_preview.png', previewBlob, 'image/png');
 
     // Meta
@@ -546,11 +582,10 @@ const SchemaUpdate = (() => {
       const scaledViewport = page.getViewport({ scale });
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
 
-      // Convertir en ImageBitmap pour éviter que Firefox ne libère la mémoire du canvas
-      const bitmap = await createImageBitmap(canvas);
-      canvas.width = 1; canvas.height = 1; // libérer le canvas
+      // Vérifier que le rendu n'est pas vide
+      validateCanvas(ctx, fullW, fullH);
       log('Rendu termine');
-      return { strips: [{ x: 0, width: fullW, canvas: bitmap }], width: fullW, height: fullH };
+      return { strips: [{ x: 0, width: fullW, canvas }], width: fullW, height: fullH };
     }
 
     // Image trop grande → rendu par bandes verticales
@@ -571,18 +606,10 @@ const SchemaUpdate = (() => {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, sw, fullH);
 
-      // Rendu avec translation du contexte pour décaler la vue
-      ctx.save();
-      ctx.translate(-sx, 0);
-      const fullViewport = page.getViewport({ scale });
-      await page.render({ canvasContext: ctx, viewport: fullViewport }).promise;
-      ctx.restore();
+      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
+      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
 
-      // Convertir en ImageBitmap (résiste à la pression mémoire Firefox)
-      const bitmap = await createImageBitmap(canvas);
-      canvas.width = 1; canvas.height = 1;
-
-      strips.push({ x: sx, width: sw, canvas: bitmap });
+      strips.push({ x: sx, width: sw, canvas });
       log('  Bande ' + (i + 1) + '/' + numStrips);
     }
 
