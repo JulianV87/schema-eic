@@ -83,11 +83,36 @@ const SchemaUpdate = (() => {
     const viewport = page.getViewport({ scale: 1 });
     log('Dimensions natives: ' + Math.round(viewport.width) + ' x ' + Math.round(viewport.height) + ' pts');
 
-    const scale = DPI / 72;
+    // Calculer l'échelle en respectant les limites du navigateur
+    const MAX_CANVAS_AREA = 80_000_000; // 80M pixels (safe pour tous navigateurs)
+    const MAX_CANVAS_DIM = 16384;       // dimension max d'un côté
+
+    let scale = DPI / 72;
+    let width = Math.floor(viewport.width * scale);
+    let height = Math.floor(viewport.height * scale);
+
+    // Réduire si trop grand
+    if (width * height > MAX_CANVAS_AREA) {
+      const ratio = Math.sqrt(MAX_CANVAS_AREA / (width * height));
+      scale *= ratio;
+      width = Math.floor(viewport.width * scale);
+      height = Math.floor(viewport.height * scale);
+    }
+    if (width > MAX_CANVAS_DIM) {
+      scale *= MAX_CANVAS_DIM / width;
+      width = Math.floor(viewport.width * scale);
+      height = Math.floor(viewport.height * scale);
+    }
+    if (height > MAX_CANVAS_DIM) {
+      scale *= MAX_CANVAS_DIM / height;
+      width = Math.floor(viewport.width * scale);
+      height = Math.floor(viewport.height * scale);
+    }
+
+    const effectiveDpi = Math.round(scale * 72);
+    log('Rendu a ' + effectiveDpi + ' DPI effectif: ' + width + ' x ' + height + ' px');
+
     const scaledViewport = page.getViewport({ scale });
-    const width = Math.floor(scaledViewport.width);
-    const height = Math.floor(scaledViewport.height);
-    log('Rendu a ' + DPI + ' DPI: ' + width + ' x ' + height + ' px');
 
     const canvas = document.createElement('canvas');
     canvas.width = width;
