@@ -97,6 +97,7 @@ const Settings = (() => {
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
     else if (activeTab === 'stickers') renderStickersSettings(container);
+    else if (activeTab === 'schema') SchemaUpdate.renderSettingsTab(container);
 
     // Synchroniser la barre du bas
     try { Search.reloadLayout(); } catch {}

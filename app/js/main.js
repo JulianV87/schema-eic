@@ -38,27 +38,41 @@
     }
     Parser.init(Data.getGares());
 
-    // Déterminer la source : tuiles complètes > PNG fallback > message d'erreur
-    const tilesComplete = await checkTilesComplete();
-
+    // Déterminer la source : Supabase Storage > tuiles locales > PNG fallback > erreur
     let tileSource;
-    if (tilesComplete) {
-      tileSource = TILES_PATH;
-      console.log('Mode: tuiles Deep Zoom');
-    } else {
-      // Tenter l'image PNG simple
-      try {
-        const resp = await fetch(FALLBACK_IMAGE, { method: 'HEAD' });
-        if (resp.ok) {
-          tileSource = { type: 'image', url: FALLBACK_IMAGE };
-          console.log('Mode: image PNG (tuiles en cours de génération)');
-        } else {
+
+    // 1. Vérifier Supabase Storage (schéma mis à jour via l'interface)
+    try {
+      const supabaseTiles = await SchemaUpdate.getTileSource();
+      if (supabaseTiles) {
+        tileSource = supabaseTiles;
+        console.log('Mode: tuiles Supabase Storage');
+      }
+    } catch (e) {
+      console.warn('Supabase tiles check:', e.message);
+    }
+
+    // 2. Sinon, tuiles locales
+    if (!tileSource) {
+      const tilesComplete = await checkTilesComplete();
+      if (tilesComplete) {
+        tileSource = TILES_PATH;
+        console.log('Mode: tuiles Deep Zoom locales');
+      } else {
+        // 3. PNG fallback
+        try {
+          const resp = await fetch(FALLBACK_IMAGE, { method: 'HEAD' });
+          if (resp.ok) {
+            tileSource = { type: 'image', url: FALLBACK_IMAGE };
+            console.log('Mode: image PNG (tuiles en cours de génération)');
+          } else {
+            showSetupMessage();
+            return;
+          }
+        } catch {
           showSetupMessage();
           return;
         }
-      } catch {
-        showSetupMessage();
-        return;
       }
     }
 
