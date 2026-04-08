@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
-sharp.limitInputPixels(false); // Désactiver la limite de pixels (image 300 DPI = 580M px)
+const SHARP_OPTS = { limitInputPixels: false }; // image 300 DPI = 580M px
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://fbcwsgqrwolxnqpasbgl.supabase.co';
 const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_KEY || '').replace(/\s+/g, '');
@@ -93,7 +93,7 @@ async function main() {
 
   // 1. Lire l'image source
   console.log('Chargement de l\'image:', imagePath);
-  const metadata = await sharp(imagePath).metadata();
+  const metadata = await sharp(imagePath, SHARP_OPTS).metadata();
   const width = metadata.width;
   const height = metadata.height;
   console.log(`  Dimensions: ${width} x ${height} px\n`);
@@ -101,7 +101,7 @@ async function main() {
   // 2. Preview (max 2000px wide)
   console.log('Génération de la preview...');
   const previewWidth = Math.min(width, 2000);
-  const previewBuf = await sharp(imagePath)
+  const previewBuf = await sharp(imagePath, SHARP_OPTS)
     .resize(previewWidth, null, { fit: 'inside' })
     .png()
     .toBuffer();
@@ -157,7 +157,7 @@ async function main() {
         if (extractW <= 0 || extractH <= 0) continue;
 
         try {
-          const tileBuffer = await sharp(imagePath)
+          const tileBuffer = await sharp(imagePath, SHARP_OPTS)
             .resize(levelWidth, levelHeight, { fit: 'fill' })
             .extract({ left, top, width: extractW, height: extractH })
             .jpeg({ quality: JPEG_QUALITY })
