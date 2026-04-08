@@ -24,6 +24,55 @@ const SchemaUpdate = (() => {
 
   let pdfjsLib = null;
   let _log = null;
+  let _floatingEl = null;
+
+  /**
+   * Indicateur flottant en haut à droite (visible même hors paramètres)
+   */
+  function showFloating(text, pct) {
+    if (!_floatingEl) {
+      _floatingEl = document.createElement('div');
+      _floatingEl.id = 'schema-update-floating';
+      _floatingEl.style.cssText = 'position:fixed;top:52px;right:12px;z-index:9999;' +
+        'background:#0c1220;border:1px solid #1e304a;border-radius:8px;padding:8px 14px;' +
+        'font-family:"JetBrains Mono",monospace;font-size:11px;color:#c8daf5;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,0.5);min-width:220px;max-width:340px;';
+      _floatingEl.innerHTML =
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">' +
+          '<span id="suf-dot" style="width:8px;height:8px;border-radius:50%;background:#ff9520;display:inline-block;animation:suf-pulse 1.5s infinite;"></span>' +
+          '<span id="suf-title" style="font-weight:600;color:#ff9520;">Mise a jour schema</span>' +
+        '</div>' +
+        '<div id="suf-text" style="color:#4a6a9a;line-height:1.4;"></div>' +
+        '<div style="background:#111a2e;border-radius:3px;overflow:hidden;height:4px;margin-top:6px;">' +
+          '<div id="suf-bar" style="height:100%;background:#ff9520;width:0%;transition:width 0.3s;"></div>' +
+        '</div>';
+      // Animation pulse
+      const style = document.createElement('style');
+      style.textContent = '@keyframes suf-pulse{0%,100%{opacity:1}50%{opacity:0.3}}';
+      document.head.appendChild(style);
+      document.body.appendChild(_floatingEl);
+    }
+    const textEl = document.getElementById('suf-text');
+    const barEl = document.getElementById('suf-bar');
+    if (textEl) textEl.textContent = text;
+    if (barEl && typeof pct === 'number') barEl.style.width = Math.round(pct * 100) + '%';
+  }
+
+  function updateFloatingDone() {
+    if (!_floatingEl) return;
+    const dot = document.getElementById('suf-dot');
+    const title = document.getElementById('suf-title');
+    const bar = document.getElementById('suf-bar');
+    if (dot) { dot.style.background = '#00d4a0'; dot.style.animation = 'none'; }
+    if (title) { title.textContent = 'Schema a jour'; title.style.color = '#00d4a0'; }
+    if (bar) { bar.style.width = '100%'; bar.style.background = '#00d4a0'; }
+    // Masquer après 10s
+    setTimeout(() => { if (_floatingEl) { _floatingEl.remove(); _floatingEl = null; } }, 10000);
+  }
+
+  function hideFloating() {
+    if (_floatingEl) { _floatingEl.remove(); _floatingEl = null; }
+  }
 
   function headers(contentType) {
     const h = {
@@ -690,9 +739,12 @@ const SchemaUpdate = (() => {
       logDiv.textContent = '';
       _log = logDiv;
 
+      showFloating('Preparation...', 0);
+
       try {
         const result = await processUpdate(selectedFile, (phase, msg, pct) => {
           progressText.textContent = msg;
+          showFloating(msg, pct);
           if (typeof pct === 'number') {
             progressBar.style.width = Math.round(pct * 100) + '%';
           }
@@ -734,8 +786,10 @@ const SchemaUpdate = (() => {
         const dpi = stages[i];
         try {
           await generateAndUploadTiles(file, dpi, (phase, msg, pct) => {
-            if (textEl) textEl.textContent = 'Arriere-plan: ' + msg;
+            const bgMsg = 'Arriere-plan: ' + msg;
+            if (textEl) textEl.textContent = bgMsg;
             if (barEl && typeof pct === 'number') barEl.style.width = Math.round(pct * 100) + '%';
+            showFloating(bgMsg, pct);
           });
           log(dpi + ' DPI termine');
         } catch (err) {
@@ -744,6 +798,7 @@ const SchemaUpdate = (() => {
       }
       if (textEl) textEl.textContent = 'Qualite maximale (300 DPI) atteinte !';
       if (barEl) { barEl.style.width = '100%'; barEl.style.background = 'var(--accent2)'; }
+      updateFloatingDone();
       _log = null;
     }
 
