@@ -545,8 +545,12 @@ const SchemaUpdate = (() => {
       ctx.fillRect(0, 0, fullW, fullH);
       const scaledViewport = page.getViewport({ scale });
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+
+      // Convertir en ImageBitmap pour éviter que Firefox ne libère la mémoire du canvas
+      const bitmap = await createImageBitmap(canvas);
+      canvas.width = 1; canvas.height = 1; // libérer le canvas
       log('Rendu termine');
-      return { strips: [{ x: 0, width: fullW, canvas }], width: fullW, height: fullH };
+      return { strips: [{ x: 0, width: fullW, canvas: bitmap }], width: fullW, height: fullH };
     }
 
     // Image trop grande → rendu par bandes verticales
@@ -574,7 +578,11 @@ const SchemaUpdate = (() => {
       await page.render({ canvasContext: ctx, viewport: fullViewport }).promise;
       ctx.restore();
 
-      strips.push({ x: sx, width: sw, canvas });
+      // Convertir en ImageBitmap (résiste à la pression mémoire Firefox)
+      const bitmap = await createImageBitmap(canvas);
+      canvas.width = 1; canvas.height = 1;
+
+      strips.push({ x: sx, width: sw, canvas: bitmap });
       log('  Bande ' + (i + 1) + '/' + numStrips);
     }
 
