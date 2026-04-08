@@ -651,35 +651,75 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Process principal : upload progressif 72 → 150 → 300 DPI
-   * Toutes les passes tournent d'un coup, l'utilisateur travaille pendant
+   * Process principal : upload PDF vers Supabase + déclenchement GitHub Actions
+   * Le serveur CI génère les tuiles à 300 DPI
    */
   async function processUpdate(file, progressCb) {
     const progress = progressCb || (() => {});
-    const DPI_STAGES = [72, 150, 300];
-    let totalUploaded = 0;
 
-    for (let i = 0; i < DPI_STAGES.length; i++) {
-      const dpi = DPI_STAGES[i];
+    // 1. Uploader le PDF vers Supabase Storage
+    log('Upload du PDF vers Supabase Storage...');
+    progress('upload', 'Upload du PDF...', 0.05);
+    await uploadToStorage('schema_update.pdf', file, 'application/pdf');
+    log('PDF uploade (' + (file.size / 1024 / 1024).toFixed(1) + ' Mo)');
 
-      log('');
-      log('=== Passe ' + (i + 1) + '/' + DPI_STAGES.length + ' : ' + dpi + ' DPI ===');
-
-      try {
-        const result = await generateAndUploadTiles(file, dpi, (phase, msg, pct) => {
-          progress(phase, 'Passe ' + (i + 1) + '/3 — ' + msg, pct);
-        });
-        totalUploaded += result.uploaded;
-      } catch (err) {
-        log('Erreur passe ' + dpi + ' DPI: ' + err.message);
-        // Continuer avec la passe suivante
-      }
+    // 2. Déclencher le workflow GitHub Actions
+    progress('trigger', 'Declenchement du serveur de generation...', 0.1);
+    const ghTokenObj = Store.getJSON('eic_github_token', null);
+    const ghToken = ghTokenObj && ghTokenObj.token;
+    if (!ghToken) {
+      throw new Error('Token GitHub non configure. Allez dans Parametres > Schema pour le configurer.');
     }
 
-    log('');
-    log('Toutes les passes terminees — ' + totalUploaded + ' tuiles');
-    progress('done', 'Schema mis a jour (300 DPI) — Recharger pour voir', 1);
-    return { changed: totalUploaded, total: totalUploaded, skipped: 0 };
+    const ghResp = await fetch('https://api.github.com/repos/JulianV87/schema-eic/dispatches', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'token ' + ghToken,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+      body: JSON.stringify({ event_type: 'update-schema' }),
+    });
+    if (!ghResp.ok && ghResp.status !== 204) {
+      throw new Error('Impossible de declencher GitHub Actions (HTTP ' + ghResp.status + '). Verifiez le token.');
+    }
+    log('Workflow GitHub Actions declenche');
+
+    // 3. Surveiller le statut dans Supabase
+    progress('processing', 'Traitement serveur en cours (300 DPI)...', 0.15);
+    log('En attente du serveur (generation des tuiles a 300 DPI)...');
+
+    const startTime = Date.now();
+    let lastStatus = 'pending';
+
+    while (true) {
+      await sleep(5000); // Vérifier toutes les 5 secondes
+
+      try {
+        await Store.forceRefresh();
+        const status = Store.getJSON('eic_schema_status', null);
+
+        if (status && status.status === 'complete') {
+          log('Serveur termine !');
+          progress('done', 'Schema mis a jour (300 DPI) — Recharger pour voir', 1);
+          return { changed: 1, total: 1, skipped: 0 };
+        }
+
+        if (status && status.status === 'failed') {
+          throw new Error('Le serveur a echoue: ' + (status.error || 'erreur inconnue'));
+        }
+
+        if (status && status.status === 'processing' && lastStatus !== 'processing') {
+          lastStatus = 'processing';
+          log('Le serveur traite le schema...');
+        }
+      } catch (e) {
+        if (e.message.includes('serveur a echoue')) throw e;
+        // Erreur réseau temporaire, on continue
+      }
+
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      progress('processing', 'Serveur en cours... ' + formatTime(elapsed) + ' ecoule', 0.15 + Math.min(0.8, elapsed / 300));
+    }
   }
 
   /**
@@ -752,6 +792,12 @@ const SchemaUpdate = (() => {
         <div id="schema-log" class="hidden" style="margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:11px;font-family:var(--mono);max-height:200px;overflow-y:auto;white-space:pre-wrap;color:var(--muted);"></div>
 
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+          <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:8px;">Configuration</div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Token GitHub (pour declencher la generation serveur)</label>
+          <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <input type="password" id="schema-gh-token" placeholder="github_pat_..." value="${(Store.getJSON('eic_github_token', null) || {}).token || ''}" style="flex:1;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px;">
+            <button id="schema-gh-save" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-family:var(--mono);">Sauver</button>
+          </div>
           <button id="schema-revert-btn" style="padding:6px 12px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;font-family:var(--mono);"
             ${source !== 'supabase' ? 'disabled style="opacity:0.4;pointer-events:none;"' : ''}>
             Revenir aux tuiles locales
@@ -841,6 +887,18 @@ const SchemaUpdate = (() => {
         const title = document.getElementById('suf-title');
         if (dot) { dot.style.background = '#ff4040'; dot.style.animation = 'none'; }
         if (title) { title.textContent = 'Erreur mise a jour'; title.style.color = '#ff4040'; }
+      }
+    });
+
+    // Sauvegarder le token GitHub
+    const ghTokenInput = document.getElementById('schema-gh-token');
+    const ghSaveBtn = document.getElementById('schema-gh-save');
+    ghSaveBtn.addEventListener('click', async () => {
+      const token = ghTokenInput.value.trim();
+      if (token) {
+        await Store.set('eic_github_token', { token: token });
+        ghSaveBtn.textContent = 'OK';
+        setTimeout(() => { ghSaveBtn.textContent = 'Sauver'; }, 1500);
       }
     });
 

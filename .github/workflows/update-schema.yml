@@ -1,0 +1,63 @@
+name: Update Schema Tiles
+
+on:
+  repository_dispatch:
+    types: [update-schema]
+
+jobs:
+  generate-tiles:
+    runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install sharp pdfjs-dist
+
+      - name: Set status to processing
+        run: |
+          curl -s -X POST "$SUPABASE_URL/rest/v1/config" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "[{\"key\": \"eic_schema_status\", \"value\": {\"status\": \"processing\", \"started\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}]"
+
+      - name: Download PDF from Supabase Storage
+        run: |
+          curl -s -o schema_update.pdf \
+            "$SUPABASE_URL/storage/v1/object/public/tiles/schema_update.pdf"
+          ls -lh schema_update.pdf
+
+      - name: Generate and upload tiles
+        run: node scripts/generate_tiles_supabase.js
+
+      - name: Set status to complete (on success)
+        if: success()
+        run: |
+          curl -s -X POST "$SUPABASE_URL/rest/v1/config" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "[{\"key\": \"eic_schema_status\", \"value\": {\"status\": \"complete\", \"finished\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}]"
+
+      - name: Set status to failed (on failure)
+        if: failure()
+        run: |
+          curl -s -X POST "$SUPABASE_URL/rest/v1/config" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "[{\"key\": \"eic_schema_status\", \"value\": {\"status\": \"failed\", \"finished\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}]"
