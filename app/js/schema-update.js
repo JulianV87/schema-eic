@@ -123,48 +123,73 @@ const SchemaUpdate = (() => {
   /**
    * Extraire une région depuis les bandes en un canvas
    */
-  function extractRegion(strips, x, y, w, h) {
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
+  // ============================================================
+  // Extraction de tuiles par manipulation directe des pixels
+  // (élimine tout drawImage depuis un grand canvas — contourne
+  // le bug Firefox "Passed-in canvas is empty")
+  // ============================================================
 
-    for (const strip of strips) {
-      const ox1 = Math.max(strip.x, x);
-      const ox2 = Math.min(strip.x + strip.width, x + w);
-      if (ox2 <= ox1) continue;
+  /**
+   * Extraire une tuile 1:1 (même résolution que la source)
+   */
+  function extractTile1to1(srcPixels, srcW, srcH, x, y, w, h) {
+    const tile = document.createElement('canvas');
+    tile.width = w;
+    tile.height = h;
+    const ctx = tile.getContext('2d');
+    const tileData = ctx.createImageData(w, h);
+    const src = srcPixels.data;
+    const dst = tileData.data;
 
-      const srcX = ox1 - strip.x;
-      const dstX = ox1 - x;
-      const drawW = ox2 - ox1;
-      const srcY = Math.max(0, y);
-      const dstY = 0;
-      const drawH = Math.min(h, strip.canvas.height - srcY);
-
-      ctx.drawImage(strip.canvas, srcX, srcY, drawW, drawH, dstX, dstY, drawW, drawH);
+    for (let row = 0; row < h; row++) {
+      const sy = y + row;
+      if (sy >= srcH) break;
+      const srcOff = (sy * srcW + x) * 4;
+      const dstOff = row * w * 4;
+      const len = Math.min(w, srcW - x) * 4;
+      dst.set(src.subarray(srcOff, srcOff + len), dstOff);
     }
-    return canvas;
+
+    ctx.putImageData(tileData, 0, 0);
+    return tile;
   }
 
   /**
-   * Créer un preview (petit canvas) depuis les bandes
+   * Extraire une tuile avec downscale (nearest-neighbor)
    */
-  function createPreview(strips, fullW, fullH, maxWidth) {
-    const pw = Math.min(maxWidth, fullW);
-    const ph = Math.round(pw * fullH / fullW);
-    const canvas = document.createElement('canvas');
-    canvas.width = pw;
-    canvas.height = ph;
-    const ctx = canvas.getContext('2d');
+  function extractTileScaled(srcPixels, srcW, srcH, srcX, srcY, srcRegionW, srcRegionH, tileW, tileH) {
+    const tile = document.createElement('canvas');
+    tile.width = tileW;
+    tile.height = tileH;
+    const ctx = tile.getContext('2d');
+    const tileData = ctx.createImageData(tileW, tileH);
+    const src = srcPixels.data;
+    const dst = tileData.data;
 
-    for (const strip of strips) {
-      const srcX = 0;
-      const srcY = 0;
-      const dstX = Math.round(strip.x * pw / fullW);
-      const dstW = Math.round(strip.width * pw / fullW);
-      ctx.drawImage(strip.canvas, srcX, srcY, strip.width, fullH, dstX, 0, dstW, ph);
+    for (let ty = 0; ty < tileH; ty++) {
+      const sy = Math.min(Math.floor(srcY + ty * srcRegionH / tileH), srcH - 1);
+      for (let tx = 0; tx < tileW; tx++) {
+        const sx = Math.min(Math.floor(srcX + tx * srcRegionW / tileW), srcW - 1);
+        const srcIdx = (sy * srcW + sx) * 4;
+        const dstIdx = (ty * tileW + tx) * 4;
+        dst[dstIdx] = src[srcIdx];
+        dst[dstIdx + 1] = src[srcIdx + 1];
+        dst[dstIdx + 2] = src[srcIdx + 2];
+        dst[dstIdx + 3] = src[srcIdx + 3];
+      }
     }
-    return canvas;
+
+    ctx.putImageData(tileData, 0, 0);
+    return tile;
+  }
+
+  /**
+   * Créer un preview depuis les pixels source (pour comparaison et upload)
+   */
+  function createPreviewFromPixels(srcPixels, srcW, srcH, maxWidth) {
+    const pw = Math.min(maxWidth, srcW);
+    const ph = Math.round(pw * srcH / srcW);
+    return extractTileScaled(srcPixels, srcW, srcH, 0, 0, srcW, srcH, pw, ph);
   }
 
   /**
@@ -434,13 +459,14 @@ const SchemaUpdate = (() => {
 
   /**
    * Générer et uploader les tuiles pour un DPI donné
+   * Utilise manipulation directe des pixels (zéro drawImage depuis la source)
    */
   async function generateAndUploadTiles(file, dpi, progressCb) {
     const progress = progressCb || (() => {});
 
     progress('pdf', 'Rendu PDF a ' + dpi + ' DPI...');
     const rendered = await renderPdfAtDpi(file, dpi);
-    const { strips, width: W, height: H } = rendered;
+    const { pixels, width: W, height: H } = rendered;
     const maxLevel = Math.ceil(Math.log2(Math.max(W, H)));
 
     // Compter les tuiles
@@ -451,11 +477,11 @@ const SchemaUpdate = (() => {
     }
 
     // ============================================================
-    // PHASE 1 : Générer TOUS les blobs de tuiles en mémoire
-    // (aucun appel réseau ici — le canvas reste vivant)
+    // PHASE 1 : Générer TOUS les blobs de tuiles depuis les pixels bruts
+    // (zéro drawImage — extraction directe TypedArray)
     // ============================================================
     progress('tiles', dpi + ' DPI — Generation des tuiles...', 0);
-    log('Generation de ~' + totalTiles + ' tuiles en memoire...');
+    log('Generation de ~' + totalTiles + ' tuiles depuis les pixels bruts...');
 
     const tileBlobs = []; // { path, blob }
     let generated = 0;
@@ -467,23 +493,48 @@ const SchemaUpdate = (() => {
       const tileCols = Math.ceil(levelWidth / TILE_SIZE);
       const tileRows = Math.ceil(levelHeight / TILE_SIZE);
 
-      const useDirectCanvas = (levelWidth * levelHeight) < 20_000_000;
-      let levelCanvas = useDirectCanvas ? createPreview(strips, W, H, levelWidth) : null;
+      const isFullScale = (levelWidth === W && levelHeight === H);
 
       for (let col = 0; col < tileCols; col++) {
         for (let row = 0; row < tileRows; row++) {
-          let blob;
-          if (levelCanvas) {
-            blob = await extractTileDirect(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          // Calculer les bounds de la tuile
+          const tileX = col * TILE_SIZE - (col > 0 ? OVERLAP : 0);
+          const tileY = row * TILE_SIZE - (row > 0 ? OVERLAP : 0);
+          const tileW = Math.min(
+            TILE_SIZE + (col > 0 ? OVERLAP : 0) + (col < tileCols - 1 ? OVERLAP : 0),
+            levelWidth - col * TILE_SIZE + (col > 0 ? OVERLAP : 0)
+          );
+          const tileH = Math.min(
+            TILE_SIZE + (row > 0 ? OVERLAP : 0) + (row < tileRows - 1 ? OVERLAP : 0),
+            levelHeight - row * TILE_SIZE + (row > 0 ? OVERLAP : 0)
+          );
+
+          const safeX = Math.max(0, tileX);
+          const safeY = Math.max(0, tileY);
+          const safeW = Math.min(tileW, levelWidth - safeX);
+          const safeH = Math.min(tileH, levelHeight - safeY);
+          if (safeW <= 0 || safeH <= 0) continue;
+
+          let tileCanvas;
+          if (isFullScale) {
+            // Même résolution → copie directe des pixels (rapide)
+            tileCanvas = extractTile1to1(pixels, W, H, safeX, safeY, safeW, safeH);
           } else {
-            blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
+            // Résolution réduite → downscale nearest-neighbor
+            const scaleX = W / levelWidth;
+            const scaleY = H / levelHeight;
+            tileCanvas = extractTileScaled(pixels, W, H,
+              Math.floor(safeX * scaleX), Math.floor(safeY * scaleY),
+              Math.ceil(safeW * scaleX), Math.ceil(safeH * scaleY),
+              safeW, safeH);
           }
+
+          const blob = await new Promise(r => tileCanvas.toBlob(r, 'image/jpeg', 0.92));
           if (!blob) continue;
 
           tileBlobs.push({ path: 'schema_files/' + level + '/' + col + '_' + row + '.jpeg', blob });
           generated++;
 
-          // Mettre à jour le progress toutes les 20 tuiles
           if (generated % 20 === 0) {
             progress('tiles', dpi + ' DPI — Generation: ' + generated + '/' + totalTiles, generated / totalTiles * 0.3);
           }
@@ -493,12 +544,9 @@ const SchemaUpdate = (() => {
 
     log('Tuiles generees: ' + generated);
 
-    // Générer le preview aussi (avant de libérer les strips)
-    const previewCanvas = createPreview(strips, W, H, 2000);
+    // Générer le preview
+    const previewCanvas = createPreviewFromPixels(pixels, W, H, 2000);
     const previewBlob = await new Promise(r => previewCanvas.toBlob(r, 'image/png'));
-
-    // Libérer les strips (grosse mémoire)
-    strips.length = 0;
 
     // ============================================================
     // PHASE 2 : Uploader tout vers Supabase
@@ -554,7 +602,8 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Rendre le PDF à un DPI spécifique (wrapper de renderPdfChunked)
+   * Rendre le PDF à un DPI spécifique → retourne ImageData brut
+   * (pas de canvas/ImageBitmap — évite tout bug Firefox drawImage)
    */
   async function renderPdfAtDpi(file, dpi) {
     await loadPdfJs();
@@ -566,63 +615,29 @@ const SchemaUpdate = (() => {
     const scale = dpi / 72;
     const fullW = Math.floor(viewport.width * scale);
     const fullH = Math.floor(viewport.height * scale);
-    const totalPixels = fullW * fullH;
 
-    const MAX_SINGLE_CANVAS = 50_000_000; // 50M px — limite safe Firefox
-    const MAX_CANVAS_DIM = 16384;        // max pixels par côté (texture GPU)
+    log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px');
+    const canvas = document.createElement('canvas');
+    canvas.width = fullW;
+    canvas.height = fullH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, fullW, fullH);
+    const scaledViewport = page.getViewport({ scale });
+    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
 
-    if (totalPixels <= MAX_SINGLE_CANVAS && fullW <= MAX_CANVAS_DIM && fullH <= MAX_CANVAS_DIM) {
-      // Image assez petite → rendu direct en un seul canvas
-      log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px (canvas unique)');
-      const canvas = document.createElement('canvas');
-      canvas.width = fullW;
-      canvas.height = fullH;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, fullW, fullH);
-      const scaledViewport = page.getViewport({ scale });
-      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+    // Extraire IMMÉDIATEMENT les pixels bruts (seule opération fiable sur ce canvas)
+    const imageData = ctx.getImageData(0, 0, fullW, fullH);
+    canvas.width = 1; canvas.height = 1; // libérer le canvas
 
-      // Extraire les pixels et créer un ImageBitmap (évite tout problème
-      // de canvas corrompu/vide — ImageBitmap est géré indépendamment)
-      const imageData = ctx.getImageData(0, 0, fullW, fullH);
-      canvas.width = 1; canvas.height = 1; // libérer le canvas original
-      const bitmap = await createImageBitmap(imageData);
-      log('Rendu termine (' + fullW + 'x' + fullH + ')');
-      return { strips: [{ x: 0, width: fullW, canvas: bitmap }], width: fullW, height: fullH };
+    // Vérifier que le rendu a produit des pixels
+    let nonWhite = 0;
+    for (let i = 0; i < Math.min(400, imageData.data.length); i += 4) {
+      if (imageData.data[i] < 250 || imageData.data[i+1] < 250 || imageData.data[i+2] < 250) nonWhite++;
     }
+    log('Rendu termine — ' + nonWhite + ' pixels non-blancs dans le coin haut-gauche');
 
-    // Image trop grande → rendu par bandes verticales
-    const MAX_STRIP_PIXELS = 40_000_000;
-    const stripMaxW = Math.min(8192, Math.floor(MAX_STRIP_PIXELS / fullH));
-    const numStrips = Math.ceil(fullW / stripMaxW);
-
-    log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px en ' + numStrips + ' bande(s)');
-
-    const strips = [];
-    for (let i = 0; i < numStrips; i++) {
-      const sx = i * stripMaxW;
-      const sw = Math.min(stripMaxW, fullW - sx);
-      const canvas = document.createElement('canvas');
-      canvas.width = sw;
-      canvas.height = fullH;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, sw, fullH);
-
-      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
-      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
-
-      // Extraire les pixels et créer un ImageBitmap
-      const stripData = ctx.getImageData(0, 0, sw, fullH);
-      canvas.width = 1; canvas.height = 1;
-      const stripBitmap = await createImageBitmap(stripData);
-
-      strips.push({ x: sx, width: sw, canvas: stripBitmap });
-      log('  Bande ' + (i + 1) + '/' + numStrips);
-    }
-
-    return { strips, width: fullW, height: fullH };
+    return { pixels: imageData, width: fullW, height: fullH };
   }
 
   function formatTime(seconds) {
