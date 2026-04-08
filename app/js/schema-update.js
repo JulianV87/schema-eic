@@ -87,7 +87,7 @@ const SchemaUpdate = (() => {
     const viewport = page.getViewport({ scale: 1 });
     log('Dimensions natives: ' + Math.round(viewport.width) + ' x ' + Math.round(viewport.height) + ' pts');
 
-    const TARGET_DPI = 200;
+    const TARGET_DPI = 300;
     const scale = TARGET_DPI / 72;
     const fullW = Math.floor(viewport.width * scale);
     const fullH = Math.floor(viewport.height * scale);
