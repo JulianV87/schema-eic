@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_URL: https://fbcwsgqrwolxnqpasbgl.supabase.co
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
     steps:
@@ -27,7 +27,7 @@ jobs:
       - name: Download PDF from Supabase Storage
         run: |
           curl -fSL -o schema_update.pdf \
-            "$SUPABASE_URL/storage/v1/object/public/tiles/schema_update.pdf"
+            "https://fbcwsgqrwolxnqpasbgl.supabase.co/storage/v1/object/public/tiles/schema_update.pdf"
           ls -lh schema_update.pdf
 
       - name: Generate and upload tiles
