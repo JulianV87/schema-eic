@@ -69,58 +69,7 @@ const SchemaUpdate = (() => {
   /**
    * Rendre le PDF page 1 dans un canvas
    */
-  /**
-   * Rendre le PDF en bandes verticales à haute résolution.
-   * Retourne { strips: [{x, width, canvas}], width, height }
-   */
-  async function renderPdfChunked(file) {
-    await loadPdfJs();
-
-    log('Lecture du PDF...');
-    const arrayBuffer = await file.arrayBuffer();
-    const data = new Uint8Array(arrayBuffer);
-
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    log('Pages: ' + pdf.numPages);
-
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1 });
-    log('Dimensions natives: ' + Math.round(viewport.width) + ' x ' + Math.round(viewport.height) + ' pts');
-
-    const TARGET_DPI = 300;
-    const scale = TARGET_DPI / 72;
-    const fullW = Math.floor(viewport.width * scale);
-    const fullH = Math.floor(viewport.height * scale);
-
-    // Calculer la largeur max par bande pour rester sous les limites navigateur
-    const MAX_STRIP_PIXELS = 40_000_000; // 40M par bande (safe)
-    const stripMaxW = Math.min(8192, Math.floor(MAX_STRIP_PIXELS / fullH));
-    const numStrips = Math.ceil(fullW / stripMaxW);
-
-    log('Rendu a ' + TARGET_DPI + ' DPI: ' + fullW + ' x ' + fullH + ' px en ' + numStrips + ' bande(s)');
-
-    const strips = [];
-    for (let i = 0; i < numStrips; i++) {
-      const sx = i * stripMaxW;
-      const sw = Math.min(stripMaxW, fullW - sx);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = sw;
-      canvas.height = fullH;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, sw, fullH);
-
-      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
-      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
-
-      strips.push({ x: sx, width: sw, canvas });
-      log('  Bande ' + (i + 1) + '/' + numStrips + ' rendue');
-    }
-
-    log('Rendu termine: ' + fullW + ' x ' + fullH);
-    return { strips, width: fullW, height: fullH };
-  }
+  // renderPdfChunked remplacé par renderPdfAtDpi dans processUpdate
 
   /**
    * Extraire une région depuis les bandes en un canvas
@@ -417,58 +366,19 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Process principal : PDF → comparaison → tuiles → upload
+   * Générer et uploader les tuiles pour un DPI donné
    */
-  async function processUpdate(file, progressCb) {
+  async function generateAndUploadTiles(file, dpi, progressCb) {
     const progress = progressCb || (() => {});
 
-    // 1. Rendre le nouveau PDF en bandes haute résolution
-    progress('pdf', 'Conversion du PDF (haute resolution)...');
-    const rendered = await renderPdfChunked(file);
+    progress('pdf', 'Rendu PDF a ' + dpi + ' DPI...');
+    const rendered = await renderPdfAtDpi(file, dpi);
     const { strips, width: W, height: H } = rendered;
     const maxLevel = Math.ceil(Math.log2(Math.max(W, H)));
 
-    // 2. Charger l'ancien preview et comparer
-    progress('compare', 'Comparaison avec l\'ancien schema...');
-    const oldPreviewResult = await loadOldPreview();
-
-    let changedBlocks = null;
-    let isFullRegen = false;
-
-    // Vérifier si un upload complet a déjà réussi auparavant
-    const prevMeta = Store.getJSON('eic_schema_meta', null);
-    const prevFullUploadDone = prevMeta && prevMeta.complete === true;
-
-    // Forcer full regen si les dimensions ont changé (DPI différent, nouveau schéma...)
-    const dimsChanged = prevMeta && (prevMeta.width !== W || prevMeta.height !== H);
-
-    if (oldPreviewResult && oldPreviewResult.fromSupabase && prevFullUploadDone && !dimsChanged) {
-      // Upload complet précédent confirmé + mêmes dimensions → comparaison partielle
-      const newPreview = createPreview(strips, W, H, oldPreviewResult.canvas.width);
-      const oldResized = resizeCanvas(oldPreviewResult.canvas, newPreview.width, newPreview.height);
-      changedBlocks = compareBlocks(oldResized, newPreview);
-      log('Blocs modifies: ' + changedBlocks.length);
-
-      if (changedBlocks.length === 0) {
-        log('Aucune difference detectee !');
-        progress('done', 'Aucune difference detectee. Le schema est identique.');
-        return { changed: 0, total: 0, skipped: 0 };
-      }
-
-      changedBlocks.forEach(b => {
-        log('  [' + b.left + ',' + b.top + '] ' + b.width + 'x' + b.height + ' — ' + b.pct + '% modifie');
-      });
-    } else {
-      log(dimsChanged
-        ? 'Dimensions changees (' + (prevMeta ? prevMeta.width + 'x' + prevMeta.height : '?') + ' -> ' + W + 'x' + H + ') — generation complete'
-        : 'Generation complete de toutes les tuiles vers Supabase...');
-      isFullRegen = true;
-    }
-
-    // 3. Créer le bucket si nécessaire
     await ensureBucket();
 
-    // 4. Générer le DZI
+    // DZI
     const dziContent = '<?xml version="1.0" encoding="UTF-8"?>\n' +
       '<Image xmlns="http://schemas.microsoft.com/deepzoom/2008"\n' +
       '       Format="jpeg"\n' +
@@ -476,26 +386,16 @@ const SchemaUpdate = (() => {
       '       TileSize="' + TILE_SIZE + '">\n' +
       '  <Size Width="' + W + '" Height="' + H + '"/>\n' +
       '</Image>';
+    await uploadToStorage('schema.dzi', new Blob([dziContent], { type: 'application/xml' }), 'application/xml');
 
-    await uploadToStorage('schema.dzi',
-      new Blob([dziContent], { type: 'application/xml' }),
-      'application/xml'
-    );
-    log('DZI uploade');
-
-    // 5. Générer et uploader les tuiles
-    let totalRegenerated = 0;
-    let totalSkipped = 0;
+    // Compter les tuiles
     let totalTiles = 0;
-
-    // Compter le total pour le progress
     for (let level = maxLevel; level >= 0; level--) {
-      const levelScale = Math.pow(2, level - maxLevel);
-      const lw = Math.max(1, Math.ceil(W * levelScale));
-      const lh = Math.max(1, Math.ceil(H * levelScale));
-      totalTiles += Math.ceil(lw / TILE_SIZE) * Math.ceil(lh / TILE_SIZE);
+      const ls = Math.pow(2, level - maxLevel);
+      totalTiles += Math.ceil(Math.max(1, Math.ceil(W * ls)) / TILE_SIZE) * Math.ceil(Math.max(1, Math.ceil(H * ls)) / TILE_SIZE);
     }
 
+    let uploaded = 0;
     let processed = 0;
     const startTime = Date.now();
 
@@ -503,104 +403,145 @@ const SchemaUpdate = (() => {
       const levelScale = Math.pow(2, level - maxLevel);
       const levelWidth = Math.max(1, Math.ceil(W * levelScale));
       const levelHeight = Math.max(1, Math.ceil(H * levelScale));
-
       const tileCols = Math.ceil(levelWidth / TILE_SIZE);
       const tileRows = Math.ceil(levelHeight / TILE_SIZE);
 
-      // Pour les niveaux bas (image petite), créer un canvas redimensionné
-      // au lieu d'extraire depuis les bandes haute résolution
       const useDirectCanvas = (levelWidth * levelHeight) < 20_000_000;
-      let levelCanvas = null;
-      if (useDirectCanvas) {
-        levelCanvas = createPreview(strips, W, H, levelWidth);
-      }
+      let levelCanvas = useDirectCanvas ? createPreview(strips, W, H, levelWidth) : null;
 
-      // Upload par batch de 6 pour ne pas saturer
       const batch = [];
 
       for (let col = 0; col < tileCols; col++) {
         for (let row = 0; row < tileRows; row++) {
           processed++;
 
-          // Vérifier si cette tuile intersecte un bloc modifié
-          if (!isFullRegen && changedBlocks) {
-            const tileSourceX = col * TILE_SIZE / levelScale;
-            const tileSourceY = row * TILE_SIZE / levelScale;
-            const tileSourceW = TILE_SIZE / levelScale;
-            const tileSourceH = TILE_SIZE / levelScale;
-
-            if (!tileIntersectsChanges(tileSourceX, tileSourceY, tileSourceW, tileSourceH, changedBlocks)) {
-              totalSkipped++;
-              continue;
-            }
-          }
-
           let blob;
           if (levelCanvas) {
-            // Extraire directement depuis le canvas redimensionné
             blob = await extractTileDirect(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
           } else {
-            // Extraire depuis les bandes haute résolution
             blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
           }
           if (!blob) continue;
 
-          const tilePath = 'schema_files/' + level + '/' + col + '_' + row + '.jpeg';
-          batch.push(uploadToStorage(tilePath, blob, 'image/jpeg'));
-          totalRegenerated++;
+          batch.push(uploadToStorage('schema_files/' + level + '/' + col + '_' + row + '.jpeg', blob, 'image/jpeg'));
+          uploaded++;
 
-          // Flush par batch de 3 avec délai (éviter rate limiting Supabase)
           if (batch.length >= 3) {
             await Promise.all(batch);
             batch.length = 0;
-            await sleep(100);
+            await sleep(80);
 
-            // Estimation du temps restant
             const elapsed = (Date.now() - startTime) / 1000;
-            const rate = totalRegenerated / elapsed;
-            const tilesLeft = (isFullRegen ? totalTiles : totalTiles) - processed;
-            const remaining = rate > 0 ? Math.round(tilesLeft / rate) : 0;
-            const mins = Math.floor(remaining / 60);
-            const secs = remaining % 60;
-            const eta = mins > 0 ? mins + 'min ' + secs + 's' : secs + 's';
-            progress('tiles', 'Tuiles: ' + totalRegenerated + ' / ~' + totalTiles + ' — Restant: ~' + eta, processed / totalTiles);
+            const elapsedStr = formatTime(Math.round(elapsed));
+            const rate = uploaded / elapsed;
+            const remaining = rate > 0 ? Math.round((totalTiles - processed) / rate) : 0;
+            const etaStr = formatTime(remaining);
+            progress('tiles', dpi + ' DPI — ' + uploaded + '/' + totalTiles + ' tuiles — ' + elapsedStr + ' ecoule — ~' + etaStr + ' restant', processed / totalTiles);
           }
         }
       }
 
-      // Flush restant du niveau
       if (batch.length > 0) {
         await Promise.all(batch);
         batch.length = 0;
       }
-
-      if (level >= maxLevel - 3 || totalRegenerated > 0) {
-        log('Niveau ' + level + ': ' + tileCols + 'x' + tileRows + ' (' + levelWidth + 'x' + levelHeight + 'px)');
-      }
     }
 
-    // 6. Uploader le preview (pour les prochaines comparaisons)
-    progress('preview', 'Upload du preview...');
+    // Preview
     const previewCanvas = createPreview(strips, W, H, 2000);
     const previewBlob = await new Promise(r => previewCanvas.toBlob(r, 'image/png'));
     await uploadToStorage('schema_preview.png', previewBlob, 'image/png');
 
-    // 7. Sauvegarder la date de mise à jour
+    // Meta
     await Store.set('eic_schema_meta', {
       source: 'supabase',
       updated: new Date().toISOString(),
       width: W,
       height: H,
+      dpi: dpi,
       complete: true,
     });
 
-    log('');
-    log('Termine !');
-    log('  Tuiles regenerees: ' + totalRegenerated);
-    log('  Tuiles inchangees: ' + totalSkipped);
-    progress('done', 'Mise a jour terminee ! ' + totalRegenerated + ' tuiles modifiees, ' + totalSkipped + ' inchangees.', 1);
+    const totalTime = formatTime(Math.round((Date.now() - startTime) / 1000));
+    log(dpi + ' DPI termine: ' + uploaded + ' tuiles en ' + totalTime);
 
-    return { changed: totalRegenerated, total: totalTiles, skipped: totalSkipped };
+    return { uploaded, totalTiles, width: W, height: H };
+  }
+
+  /**
+   * Rendre le PDF à un DPI spécifique (wrapper de renderPdfChunked)
+   */
+  async function renderPdfAtDpi(file, dpi) {
+    await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+
+    const scale = dpi / 72;
+    const fullW = Math.floor(viewport.width * scale);
+    const fullH = Math.floor(viewport.height * scale);
+
+    const MAX_STRIP_PIXELS = 40_000_000;
+    const stripMaxW = Math.min(8192, Math.floor(MAX_STRIP_PIXELS / fullH));
+    const numStrips = Math.ceil(fullW / stripMaxW);
+
+    log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px en ' + numStrips + ' bande(s)');
+
+    const strips = [];
+    for (let i = 0; i < numStrips; i++) {
+      const sx = i * stripMaxW;
+      const sw = Math.min(stripMaxW, fullW - sx);
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = fullH;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, sw, fullH);
+      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
+      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
+      strips.push({ x: sx, width: sw, canvas });
+      log('  Bande ' + (i + 1) + '/' + numStrips);
+    }
+
+    return { strips, width: fullW, height: fullH };
+  }
+
+  function formatTime(seconds) {
+    if (seconds < 60) return seconds + 's';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m + 'min' + (s > 0 ? ' ' + s + 's' : '');
+  }
+
+  /**
+   * Process principal : upload progressif 100 → 200 → 300 DPI
+   * Le premier palier (100 DPI) est rapide, les suivants tournent en arrière-plan
+   */
+  async function processUpdate(file, progressCb) {
+    const progress = progressCb || (() => {});
+    const DPI_STAGES = [100, 200, 300];
+
+    for (let i = 0; i < DPI_STAGES.length; i++) {
+      const dpi = DPI_STAGES[i];
+      const isFirst = i === 0;
+
+      log('');
+      log('=== Passe ' + (i + 1) + '/' + DPI_STAGES.length + ' : ' + dpi + ' DPI ===');
+
+      const result = await generateAndUploadTiles(file, dpi, progress);
+
+      if (isFirst) {
+        // Premier palier terminé → le schema est utilisable
+        progress('stage-done', 'Schema mis a jour (' + dpi + ' DPI). Amelioration en cours...', 1);
+        return { changed: result.uploaded, total: result.totalTiles, skipped: 0, nextStages: DPI_STAGES.slice(1), file };
+      }
+    }
+
+    log('');
+    log('Toutes les passes terminees (300 DPI)');
+    progress('done', 'Mise a jour terminee en qualite maximale (300 DPI).', 1);
+    return { changed: 0, total: 0, skipped: 0 };
   }
 
   /**
@@ -755,13 +696,23 @@ const SchemaUpdate = (() => {
           if (typeof pct === 'number') {
             progressBar.style.width = Math.round(pct * 100) + '%';
           }
-          if (phase === 'done') {
-            progressBar.style.width = '100%';
-            progressBar.style.background = 'var(--accent2)';
-          }
         });
 
-        if (result.changed > 0) {
+        if (result.nextStages && result.nextStages.length > 0) {
+          // Premier palier terminé — proposer de recharger + lancer la suite en arrière-plan
+          progressBar.style.width = '100%';
+          progressBar.style.background = 'var(--accent2)';
+          updateBtn.textContent = 'Recharger (100 DPI disponible)';
+          updateBtn.disabled = false;
+          updateBtn.onclick = () => location.reload();
+
+          // Lancer les passes suivantes en arrière-plan
+          log('');
+          log('Amelioration en arriere-plan...');
+          runBackgroundUpgrade(result.file, result.nextStages, progressText, progressBar);
+        } else if (result.changed > 0) {
+          progressBar.style.width = '100%';
+          progressBar.style.background = 'var(--accent2)';
           updateBtn.textContent = 'Recharger l\'application';
           updateBtn.disabled = false;
           updateBtn.onclick = () => location.reload();
@@ -775,9 +726,26 @@ const SchemaUpdate = (() => {
         updateBtn.textContent = 'Reessayer';
         updateBtn.disabled = false;
       }
-
-      _log = null;
     });
+
+    /** Amélioration progressive en arrière-plan (200 → 300 DPI) */
+    async function runBackgroundUpgrade(file, stages, textEl, barEl) {
+      for (let i = 0; i < stages.length; i++) {
+        const dpi = stages[i];
+        try {
+          await generateAndUploadTiles(file, dpi, (phase, msg, pct) => {
+            if (textEl) textEl.textContent = 'Arriere-plan: ' + msg;
+            if (barEl && typeof pct === 'number') barEl.style.width = Math.round(pct * 100) + '%';
+          });
+          log(dpi + ' DPI termine');
+        } catch (err) {
+          log('Erreur ' + dpi + ' DPI: ' + err.message + ' (sera reessaye au prochain upload)');
+        }
+      }
+      if (textEl) textEl.textContent = 'Qualite maximale (300 DPI) atteinte !';
+      if (barEl) { barEl.style.width = '100%'; barEl.style.background = 'var(--accent2)'; }
+      _log = null;
+    }
 
     revertBtn.addEventListener('click', async () => {
       await Store.set('eic_schema_meta', { source: 'local' });
@@ -785,5 +753,5 @@ const SchemaUpdate = (() => {
     });
   }
 
-  return { processUpdate, getTileSource, renderSettingsTab, loadPdfJs };
+  return { processUpdate, generateAndUploadTiles, getTileSource, renderSettingsTab, loadPdfJs };
 })();
