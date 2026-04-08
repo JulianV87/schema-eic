@@ -54,19 +54,15 @@ const SchemaUpdate = (() => {
 
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs';
-      script.type = 'module';
-      // Fallback : utiliser la version UMD
-      const scriptUmd = document.createElement('script');
-      scriptUmd.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.js';
-      scriptUmd.onload = () => {
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = () => {
         pdfjsLib = window.pdfjsLib;
         pdfjsLib.GlobalWorkerOptions.workerSrc =
-          'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.js';
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         resolve();
       };
-      scriptUmd.onerror = reject;
-      document.head.appendChild(scriptUmd);
+      script.onerror = reject;
+      document.head.appendChild(script);
     });
   }
 
