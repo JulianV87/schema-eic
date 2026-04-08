@@ -308,6 +308,38 @@ const SchemaUpdate = (() => {
   }
 
   /**
+   * Extraire une tuile directement depuis un canvas déjà redimensionné (niveaux bas)
+   */
+  function extractTileDirect(sourceCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows) {
+    const x = col * TILE_SIZE - (col > 0 ? OVERLAP : 0);
+    const y = row * TILE_SIZE - (row > 0 ? OVERLAP : 0);
+    const w = Math.min(
+      TILE_SIZE + (col > 0 ? OVERLAP : 0) + (col < tileCols - 1 ? OVERLAP : 0),
+      levelWidth - col * TILE_SIZE + (col > 0 ? OVERLAP : 0)
+    );
+    const h = Math.min(
+      TILE_SIZE + (row > 0 ? OVERLAP : 0) + (row < tileRows - 1 ? OVERLAP : 0),
+      levelHeight - row * TILE_SIZE + (row > 0 ? OVERLAP : 0)
+    );
+    if (w <= 0 || h <= 0) return null;
+
+    const safeX = Math.max(0, x);
+    const safeY = Math.max(0, y);
+    const safeW = Math.min(w, levelWidth - safeX);
+    const safeH = Math.min(h, levelHeight - safeY);
+    if (safeW <= 0 || safeH <= 0) return null;
+
+    const tileCanvas = document.createElement('canvas');
+    tileCanvas.width = safeW;
+    tileCanvas.height = safeH;
+    tileCanvas.getContext('2d').drawImage(sourceCanvas, safeX, safeY, safeW, safeH, 0, 0, safeW, safeH);
+
+    return new Promise(resolve => {
+      tileCanvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.92);
+    });
+  }
+
+  /**
    * Upload un fichier vers Supabase Storage
    */
   async function uploadToStorage(path, blob, contentType) {
@@ -392,8 +424,11 @@ const SchemaUpdate = (() => {
     const prevMeta = Store.getJSON('eic_schema_meta', null);
     const prevFullUploadDone = prevMeta && prevMeta.complete === true;
 
-    if (oldPreviewResult && oldPreviewResult.fromSupabase && prevFullUploadDone) {
-      // Upload complet précédent confirmé → comparaison partielle possible
+    // Forcer full regen si les dimensions ont changé (DPI différent, nouveau schéma...)
+    const dimsChanged = prevMeta && (prevMeta.width !== W || prevMeta.height !== H);
+
+    if (oldPreviewResult && oldPreviewResult.fromSupabase && prevFullUploadDone && !dimsChanged) {
+      // Upload complet précédent confirmé + mêmes dimensions → comparaison partielle
       const newPreview = createPreview(strips, W, H, oldPreviewResult.canvas.width);
       const oldResized = resizeCanvas(oldPreviewResult.canvas, newPreview.width, newPreview.height);
       changedBlocks = compareBlocks(oldResized, newPreview);
@@ -409,8 +444,9 @@ const SchemaUpdate = (() => {
         log('  [' + b.left + ',' + b.top + '] ' + b.width + 'x' + b.height + ' — ' + b.pct + '% modifie');
       });
     } else {
-      // Pas d'upload complet précédent → generation complete obligatoire
-      log('Generation complete de toutes les tuiles vers Supabase...');
+      log(dimsChanged
+        ? 'Dimensions changees (' + (prevMeta ? prevMeta.width + 'x' + prevMeta.height : '?') + ' -> ' + W + 'x' + H + ') — generation complete'
+        : 'Generation complete de toutes les tuiles vers Supabase...');
       isFullRegen = true;
     }
 
@@ -446,6 +482,7 @@ const SchemaUpdate = (() => {
     }
 
     let processed = 0;
+    const startTime = Date.now();
 
     for (let level = maxLevel; level >= 0; level--) {
       const levelScale = Math.pow(2, level - maxLevel);
@@ -454,6 +491,14 @@ const SchemaUpdate = (() => {
 
       const tileCols = Math.ceil(levelWidth / TILE_SIZE);
       const tileRows = Math.ceil(levelHeight / TILE_SIZE);
+
+      // Pour les niveaux bas (image petite), créer un canvas redimensionné
+      // au lieu d'extraire depuis les bandes haute résolution
+      const useDirectCanvas = (levelWidth * levelHeight) < 20_000_000;
+      let levelCanvas = null;
+      if (useDirectCanvas) {
+        levelCanvas = createPreview(strips, W, H, levelWidth);
+      }
 
       // Upload par batch de 6 pour ne pas saturer
       const batch = [];
@@ -475,7 +520,14 @@ const SchemaUpdate = (() => {
             }
           }
 
-          const blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          let blob;
+          if (levelCanvas) {
+            // Extraire directement depuis le canvas redimensionné
+            blob = await extractTileDirect(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          } else {
+            // Extraire depuis les bandes haute résolution
+            blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          }
           if (!blob) continue;
 
           const tilePath = 'schema_files/' + level + '/' + col + '_' + row + '.jpeg';
@@ -486,7 +538,15 @@ const SchemaUpdate = (() => {
           if (batch.length >= 6) {
             await Promise.all(batch);
             batch.length = 0;
-            progress('tiles', 'Tuiles: ' + totalRegenerated + ' uploadees / ' + totalSkipped + ' inchangees', processed / totalTiles);
+
+            // Estimation du temps restant
+            const elapsed = (Date.now() - startTime) / 1000;
+            const rate = processed / elapsed;
+            const remaining = Math.round((totalTiles - processed) / rate);
+            const mins = Math.floor(remaining / 60);
+            const secs = remaining % 60;
+            const eta = mins > 0 ? mins + 'min ' + secs + 's' : secs + 's';
+            progress('tiles', 'Tuiles: ' + totalRegenerated + ' uploadees — Restant: ~' + eta, processed / totalTiles);
           }
         }
       }
