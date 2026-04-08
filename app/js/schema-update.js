@@ -63,11 +63,14 @@ const SchemaUpdate = (() => {
     const dot = document.getElementById('suf-dot');
     const title = document.getElementById('suf-title');
     const bar = document.getElementById('suf-bar');
+    const text = document.getElementById('suf-text');
     if (dot) { dot.style.background = '#00d4a0'; dot.style.animation = 'none'; }
-    if (title) { title.textContent = 'Schema a jour'; title.style.color = '#00d4a0'; }
+    if (title) { title.textContent = 'Schema mis a jour'; title.style.color = '#00d4a0'; }
     if (bar) { bar.style.width = '100%'; bar.style.background = '#00d4a0'; }
-    // Masquer après 10s
-    setTimeout(() => { if (_floatingEl) { _floatingEl.remove(); _floatingEl = null; } }, 10000);
+    if (text) {
+      text.innerHTML = '<button id="suf-reload" style="margin-top:4px;padding:6px 16px;background:#00d4a0;color:#000;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600;width:100%;">Recharger pour voir le nouveau schema</button>';
+      document.getElementById('suf-reload').addEventListener('click', () => location.reload());
+    }
   }
 
   function hideFloating() {
@@ -648,33 +651,35 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Process principal : upload progressif 100 → 200 → 300 DPI
-   * Le premier palier (100 DPI) est rapide, les suivants tournent en arrière-plan
+   * Process principal : upload progressif 72 → 150 → 300 DPI
+   * Toutes les passes tournent d'un coup, l'utilisateur travaille pendant
    */
   async function processUpdate(file, progressCb) {
     const progress = progressCb || (() => {});
     const DPI_STAGES = [72, 150, 300];
+    let totalUploaded = 0;
 
     for (let i = 0; i < DPI_STAGES.length; i++) {
       const dpi = DPI_STAGES[i];
-      const isFirst = i === 0;
 
       log('');
       log('=== Passe ' + (i + 1) + '/' + DPI_STAGES.length + ' : ' + dpi + ' DPI ===');
 
-      const result = await generateAndUploadTiles(file, dpi, progress);
-
-      if (isFirst) {
-        // Premier palier terminé → le schema est utilisable
-        progress('stage-done', 'Schema mis a jour (' + dpi + ' DPI). Amelioration en cours...', 1);
-        return { changed: result.uploaded, total: result.totalTiles, skipped: 0, nextStages: DPI_STAGES.slice(1), file };
+      try {
+        const result = await generateAndUploadTiles(file, dpi, (phase, msg, pct) => {
+          progress(phase, 'Passe ' + (i + 1) + '/3 — ' + msg, pct);
+        });
+        totalUploaded += result.uploaded;
+      } catch (err) {
+        log('Erreur passe ' + dpi + ' DPI: ' + err.message);
+        // Continuer avec la passe suivante
       }
     }
 
     log('');
-    log('Toutes les passes terminees (300 DPI)');
-    progress('done', 'Mise a jour terminee en qualite maximale (300 DPI).', 1);
-    return { changed: 0, total: 0, skipped: 0 };
+    log('Toutes les passes terminees — ' + totalUploaded + ' tuiles');
+    progress('done', 'Schema mis a jour (300 DPI) — Recharger pour voir', 1);
+    return { changed: totalUploaded, total: totalUploaded, skipped: 0 };
   }
 
   /**
@@ -815,76 +820,29 @@ const SchemaUpdate = (() => {
 
     updateBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
+      const file = selectedFile;
 
-      updateBtn.disabled = true;
-      updateBtn.textContent = 'Traitement en cours...';
-      progressDiv.classList.remove('hidden');
-      logDiv.classList.remove('hidden');
-      logDiv.textContent = '';
-      _log = logDiv;
+      // Fermer les paramètres — l'utilisateur peut travailler
+      document.getElementById('settings-popup').classList.add('hidden');
 
+      // Lancer l'upload en arrière-plan via le floating indicator
       showFloating('Preparation...', 0);
 
       try {
-        const result = await processUpdate(selectedFile, (phase, msg, pct) => {
-          progressText.textContent = msg;
+        await processUpdate(file, (phase, msg, pct) => {
           showFloating(msg, pct);
-          if (typeof pct === 'number') {
-            progressBar.style.width = Math.round(pct * 100) + '%';
-          }
         });
-
-        if (result.nextStages && result.nextStages.length > 0) {
-          // Premier palier terminé — proposer de recharger + lancer la suite en arrière-plan
-          progressBar.style.width = '100%';
-          progressBar.style.background = 'var(--accent2)';
-          updateBtn.textContent = 'Recharger (100 DPI disponible)';
-          updateBtn.disabled = false;
-          updateBtn.onclick = () => location.reload();
-
-          // Lancer les passes suivantes en arrière-plan
-          log('');
-          log('Amelioration en arriere-plan...');
-          runBackgroundUpgrade(result.file, result.nextStages, progressText, progressBar);
-        } else if (result.changed > 0) {
-          progressBar.style.width = '100%';
-          progressBar.style.background = 'var(--accent2)';
-          updateBtn.textContent = 'Recharger l\'application';
-          updateBtn.disabled = false;
-          updateBtn.onclick = () => location.reload();
-        } else {
-          updateBtn.textContent = 'Aucun changement';
-        }
+        updateFloatingDone();
       } catch (err) {
         log('ERREUR: ' + err.message);
-        progressText.textContent = 'Erreur: ' + err.message;
-        progressBar.style.background = 'var(--danger)';
-        updateBtn.textContent = 'Reessayer';
-        updateBtn.disabled = false;
+        showFloating('Erreur: ' + err.message, 0);
+        // Changer le style en rouge
+        const dot = document.getElementById('suf-dot');
+        const title = document.getElementById('suf-title');
+        if (dot) { dot.style.background = '#ff4040'; dot.style.animation = 'none'; }
+        if (title) { title.textContent = 'Erreur mise a jour'; title.style.color = '#ff4040'; }
       }
     });
-
-    /** Amélioration progressive en arrière-plan (200 → 300 DPI) */
-    async function runBackgroundUpgrade(file, stages, textEl, barEl) {
-      for (let i = 0; i < stages.length; i++) {
-        const dpi = stages[i];
-        try {
-          await generateAndUploadTiles(file, dpi, (phase, msg, pct) => {
-            const bgMsg = 'Arriere-plan: ' + msg;
-            if (textEl) textEl.textContent = bgMsg;
-            if (barEl && typeof pct === 'number') barEl.style.width = Math.round(pct * 100) + '%';
-            showFloating(bgMsg, pct);
-          });
-          log(dpi + ' DPI termine');
-        } catch (err) {
-          log('Erreur ' + dpi + ' DPI: ' + err.message + ' (sera reessaye au prochain upload)');
-        }
-      }
-      if (textEl) textEl.textContent = 'Qualite maximale (300 DPI) atteinte !';
-      if (barEl) { barEl.style.width = '100%'; barEl.style.background = 'var(--accent2)'; }
-      updateFloatingDone();
-      _log = null;
-    }
 
     revertBtn.addEventListener('click', async () => {
       await Store.set('eic_schema_meta', { source: 'local' });
