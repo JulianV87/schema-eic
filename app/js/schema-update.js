@@ -69,7 +69,11 @@ const SchemaUpdate = (() => {
   /**
    * Rendre le PDF page 1 dans un canvas
    */
-  async function renderPdfToCanvas(file) {
+  /**
+   * Rendre le PDF en bandes verticales à haute résolution.
+   * Retourne { strips: [{x, width, canvas}], width, height }
+   */
+  async function renderPdfChunked(file) {
     await loadPdfJs();
 
     log('Lecture du PDF...');
@@ -83,50 +87,85 @@ const SchemaUpdate = (() => {
     const viewport = page.getViewport({ scale: 1 });
     log('Dimensions natives: ' + Math.round(viewport.width) + ' x ' + Math.round(viewport.height) + ' pts');
 
-    // Calculer l'échelle en respectant les limites du navigateur
-    const MAX_CANVAS_AREA = 80_000_000; // 80M pixels (safe pour tous navigateurs)
-    const MAX_CANVAS_DIM = 16384;       // dimension max d'un côté
+    const TARGET_DPI = 200;
+    const scale = TARGET_DPI / 72;
+    const fullW = Math.floor(viewport.width * scale);
+    const fullH = Math.floor(viewport.height * scale);
 
-    let scale = DPI / 72;
-    let width = Math.floor(viewport.width * scale);
-    let height = Math.floor(viewport.height * scale);
+    // Calculer la largeur max par bande pour rester sous les limites navigateur
+    const MAX_STRIP_PIXELS = 40_000_000; // 40M par bande (safe)
+    const stripMaxW = Math.min(8192, Math.floor(MAX_STRIP_PIXELS / fullH));
+    const numStrips = Math.ceil(fullW / stripMaxW);
 
-    // Réduire si trop grand
-    if (width * height > MAX_CANVAS_AREA) {
-      const ratio = Math.sqrt(MAX_CANVAS_AREA / (width * height));
-      scale *= ratio;
-      width = Math.floor(viewport.width * scale);
-      height = Math.floor(viewport.height * scale);
+    log('Rendu a ' + TARGET_DPI + ' DPI: ' + fullW + ' x ' + fullH + ' px en ' + numStrips + ' bande(s)');
+
+    const strips = [];
+    for (let i = 0; i < numStrips; i++) {
+      const sx = i * stripMaxW;
+      const sw = Math.min(stripMaxW, fullW - sx);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = fullH;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, sw, fullH);
+
+      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
+      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
+
+      strips.push({ x: sx, width: sw, canvas });
+      log('  Bande ' + (i + 1) + '/' + numStrips + ' rendue');
     }
-    if (width > MAX_CANVAS_DIM) {
-      scale *= MAX_CANVAS_DIM / width;
-      width = Math.floor(viewport.width * scale);
-      height = Math.floor(viewport.height * scale);
-    }
-    if (height > MAX_CANVAS_DIM) {
-      scale *= MAX_CANVAS_DIM / height;
-      width = Math.floor(viewport.width * scale);
-      height = Math.floor(viewport.height * scale);
-    }
 
-    const effectiveDpi = Math.round(scale * 72);
-    log('Rendu a ' + effectiveDpi + ' DPI effectif: ' + width + ' x ' + height + ' px');
+    log('Rendu termine: ' + fullW + ' x ' + fullH);
+    return { strips, width: fullW, height: fullH };
+  }
 
-    const scaledViewport = page.getViewport({ scale });
-
+  /**
+   * Extraire une région depuis les bandes en un canvas
+   */
+  function extractRegion(strips, x, y, w, h) {
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
 
-    // Fond blanc
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
+    for (const strip of strips) {
+      const ox1 = Math.max(strip.x, x);
+      const ox2 = Math.min(strip.x + strip.width, x + w);
+      if (ox2 <= ox1) continue;
 
-    log('Rendu en cours (peut prendre 10-30s)...');
-    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-    log('Rendu termine: ' + width + ' x ' + height);
+      const srcX = ox1 - strip.x;
+      const dstX = ox1 - x;
+      const drawW = ox2 - ox1;
+      const srcY = Math.max(0, y);
+      const dstY = 0;
+      const drawH = Math.min(h, strip.canvas.height - srcY);
 
+      ctx.drawImage(strip.canvas, srcX, srcY, drawW, drawH, dstX, dstY, drawW, drawH);
+    }
+    return canvas;
+  }
+
+  /**
+   * Créer un preview (petit canvas) depuis les bandes
+   */
+  function createPreview(strips, fullW, fullH, maxWidth) {
+    const pw = Math.min(maxWidth, fullW);
+    const ph = Math.round(pw * fullH / fullW);
+    const canvas = document.createElement('canvas');
+    canvas.width = pw;
+    canvas.height = ph;
+    const ctx = canvas.getContext('2d');
+
+    for (const strip of strips) {
+      const srcX = 0;
+      const srcY = 0;
+      const dstX = Math.round(strip.x * pw / fullW);
+      const dstW = Math.round(strip.width * pw / fullW);
+      ctx.drawImage(strip.canvas, srcX, srcY, strip.width, fullH, dstX, 0, dstW, ph);
+    }
     return canvas;
   }
 
@@ -223,9 +262,9 @@ const SchemaUpdate = (() => {
   }
 
   /**
-   * Générer une tuile JPEG blob depuis le canvas source
+   * Générer une tuile JPEG blob depuis les bandes source (haute résolution)
    */
-  function extractTileBlob(sourceCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows) {
+  function extractTileBlobFromStrips(strips, fullW, fullH, levelWidth, levelHeight, col, row, tileCols, tileRows) {
     const x = col * TILE_SIZE - (col > 0 ? OVERLAP : 0);
     const y = row * TILE_SIZE - (row > 0 ? OVERLAP : 0);
     const w = Math.min(
@@ -246,14 +285,25 @@ const SchemaUpdate = (() => {
 
     if (safeW <= 0 || safeH <= 0) return null;
 
+    // Mapper les coordonnées de la tuile vers l'image source haute résolution
+    const scaleX = fullW / levelWidth;
+    const scaleY = fullH / levelHeight;
+    const srcX = Math.floor(safeX * scaleX);
+    const srcY = Math.floor(safeY * scaleY);
+    const srcW = Math.ceil(safeW * scaleX);
+    const srcH = Math.ceil(safeH * scaleY);
+
+    // Extraire la région source depuis les bandes
+    const srcCanvas = extractRegion(strips, srcX, srcY, srcW, srcH);
+
+    // Redimensionner à la taille de la tuile
     const tileCanvas = document.createElement('canvas');
     tileCanvas.width = safeW;
     tileCanvas.height = safeH;
-    const ctx = tileCanvas.getContext('2d');
-    ctx.drawImage(sourceCanvas, safeX, safeY, safeW, safeH, 0, 0, safeW, safeH);
+    tileCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, srcW, srcH, 0, 0, safeW, safeH);
 
     return new Promise(resolve => {
-      tileCanvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.85);
+      tileCanvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.92);
     });
   }
 
@@ -325,12 +375,10 @@ const SchemaUpdate = (() => {
   async function processUpdate(file, progressCb) {
     const progress = progressCb || (() => {});
 
-    // 1. Rendre le nouveau PDF
-    progress('pdf', 'Conversion du PDF...');
-    const newCanvas = await renderPdfToCanvas(file);
-
-    const W = newCanvas.width;
-    const H = newCanvas.height;
+    // 1. Rendre le nouveau PDF en bandes haute résolution
+    progress('pdf', 'Conversion du PDF (haute resolution)...');
+    const rendered = await renderPdfChunked(file);
+    const { strips, width: W, height: H } = rendered;
     const maxLevel = Math.ceil(Math.log2(Math.max(W, H)));
 
     // 2. Charger l'ancien preview et comparer
@@ -346,8 +394,9 @@ const SchemaUpdate = (() => {
 
     if (oldPreviewResult && oldPreviewResult.fromSupabase && prevFullUploadDone) {
       // Upload complet précédent confirmé → comparaison partielle possible
-      const oldResized = resizeCanvas(oldPreviewResult.canvas, W, H);
-      changedBlocks = compareBlocks(oldResized, newCanvas);
+      const newPreview = createPreview(strips, W, H, oldPreviewResult.canvas.width);
+      const oldResized = resizeCanvas(oldPreviewResult.canvas, newPreview.width, newPreview.height);
+      changedBlocks = compareBlocks(oldResized, newPreview);
       log('Blocs modifies: ' + changedBlocks.length);
 
       if (changedBlocks.length === 0) {
@@ -406,10 +455,7 @@ const SchemaUpdate = (() => {
       const tileCols = Math.ceil(levelWidth / TILE_SIZE);
       const tileRows = Math.ceil(levelHeight / TILE_SIZE);
 
-      // Redimensionner le canvas pour ce niveau
-      const levelCanvas = resizeCanvas(newCanvas, levelWidth, levelHeight);
-
-      // Upload par batch de 5 pour ne pas saturer
+      // Upload par batch de 6 pour ne pas saturer
       const batch = [];
 
       for (let col = 0; col < tileCols; col++) {
@@ -429,7 +475,7 @@ const SchemaUpdate = (() => {
             }
           }
 
-          const blob = await extractTileBlob(levelCanvas, levelWidth, levelHeight, col, row, tileCols, tileRows);
+          const blob = await extractTileBlobFromStrips(strips, W, H, levelWidth, levelHeight, col, row, tileCols, tileRows);
           if (!blob) continue;
 
           const tilePath = 'schema_files/' + level + '/' + col + '_' + row + '.jpeg';
@@ -458,13 +504,9 @@ const SchemaUpdate = (() => {
 
     // 6. Uploader le preview (pour les prochaines comparaisons)
     progress('preview', 'Upload du preview...');
-    const previewCanvas = resizeCanvas(newCanvas, Math.min(2000, W), Math.round(Math.min(2000, W) * H / W));
+    const previewCanvas = createPreview(strips, W, H, 2000);
     const previewBlob = await new Promise(r => previewCanvas.toBlob(r, 'image/png'));
     await uploadToStorage('schema_preview.png', previewBlob, 'image/png');
-
-    // Aussi le schema complet en PNG
-    const fullBlob = await new Promise(r => newCanvas.toBlob(r, 'image/png'));
-    await uploadToStorage('schema.png', fullBlob, 'image/png');
 
     // 7. Sauvegarder la date de mise à jour
     await Store.set('eic_schema_meta', {
