@@ -460,9 +460,12 @@ const SchemaUpdate = (() => {
     await uploadToStorage('schema.png', fullBlob, 'image/png');
 
     // 7. Sauvegarder la date de mise à jour
-    await Store.set('eic_schema_source', 'supabase');
-    await Store.set('eic_schema_updated', new Date().toISOString());
-    await Store.set('eic_schema_dimensions', { width: W, height: H });
+    await Store.set('eic_schema_meta', {
+      source: 'supabase',
+      updated: new Date().toISOString(),
+      width: W,
+      height: H,
+    });
 
     log('');
     log('Termine !');
@@ -477,8 +480,8 @@ const SchemaUpdate = (() => {
    * Obtenir le tile source pour OpenSeadragon (Supabase ou local)
    */
   async function getTileSource() {
-    const source = Store.getJSON('eic_schema_source', null);
-    if (source === 'supabase') {
+    const meta = Store.getJSON('eic_schema_meta', null);
+    if (meta && meta.source === 'supabase') {
       // Vérifier que le DZI existe dans Supabase
       const dziUrl = SUPABASE_URL + '/storage/v1/object/public/' + STORAGE_BUCKET + '/schema.dzi';
       try {
@@ -495,9 +498,10 @@ const SchemaUpdate = (() => {
    * Rendu de l'UI dans le panneau Paramètres
    */
   function renderSettingsTab(container) {
-    const lastUpdate = Store.getJSON('eic_schema_updated', null);
-    const dims = Store.getJSON('eic_schema_dimensions', null);
-    const source = Store.getJSON('eic_schema_source', 'local');
+    const meta = Store.getJSON('eic_schema_meta', null) || {};
+    const lastUpdate = meta.updated || null;
+    const dims = (meta.width && meta.height) ? meta : null;
+    const source = meta.source || 'local';
 
     container.innerHTML = `
       <div style="padding:12px;">
@@ -649,7 +653,7 @@ const SchemaUpdate = (() => {
     });
 
     revertBtn.addEventListener('click', async () => {
-      await Store.set('eic_schema_source', 'local');
+      await Store.set('eic_schema_meta', { source: 'local' });
       location.reload();
     });
   }
