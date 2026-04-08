@@ -22,7 +22,9 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm install sharp pdfjs-dist
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+          npm install sharp
 
       - name: Download PDF from Supabase Storage
         run: |
@@ -30,5 +32,11 @@ jobs:
             "https://fbcwsgqrwolxnqpasbgl.supabase.co/storage/v1/object/public/tiles/schema_update.pdf"
           ls -lh schema_update.pdf
 
+      - name: Convert PDF to PNG at 300 DPI
+        run: |
+          pdftoppm -png -r 300 -f 1 -l 1 schema_update.pdf schema_page
+          mv schema_page-1.png schema.png
+          ls -lh schema.png
+
       - name: Generate and upload tiles
-        run: node scripts/generate_tiles_supabase.js
+        run: node scripts/generate_tiles_supabase.js schema.png
