@@ -14,7 +14,7 @@ const path = require('path');
 const sharp = require('sharp');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://fbcwsgqrwolxnqpasbgl.supabase.co';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_KEY || '').trim();
 
 if (!SUPABASE_SERVICE_KEY) {
   console.error('ERREUR: SUPABASE_SERVICE_KEY non définie');
