@@ -530,7 +530,26 @@ const SchemaUpdate = (() => {
     const scale = dpi / 72;
     const fullW = Math.floor(viewport.width * scale);
     const fullH = Math.floor(viewport.height * scale);
+    const totalPixels = fullW * fullH;
 
+    const MAX_SINGLE_CANVAS = 80_000_000; // 80M px — limite canvas unique
+
+    if (totalPixels <= MAX_SINGLE_CANVAS) {
+      // Image assez petite → rendu direct en un seul canvas
+      log('Rendu ' + dpi + ' DPI: ' + fullW + 'x' + fullH + ' px (canvas unique)');
+      const canvas = document.createElement('canvas');
+      canvas.width = fullW;
+      canvas.height = fullH;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, fullW, fullH);
+      const scaledViewport = page.getViewport({ scale });
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+      log('Rendu termine');
+      return { strips: [{ x: 0, width: fullW, canvas }], width: fullW, height: fullH };
+    }
+
+    // Image trop grande → rendu par bandes verticales
     const MAX_STRIP_PIXELS = 40_000_000;
     const stripMaxW = Math.min(8192, Math.floor(MAX_STRIP_PIXELS / fullH));
     const numStrips = Math.ceil(fullW / stripMaxW);
@@ -547,8 +566,14 @@ const SchemaUpdate = (() => {
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, sw, fullH);
-      const stripViewport = page.getViewport({ scale, offsetX: -sx, offsetY: 0 });
-      await page.render({ canvasContext: ctx, viewport: stripViewport }).promise;
+
+      // Rendu avec translation du contexte pour décaler la vue
+      ctx.save();
+      ctx.translate(-sx, 0);
+      const fullViewport = page.getViewport({ scale });
+      await page.render({ canvasContext: ctx, viewport: fullViewport }).promise;
+      ctx.restore();
+
       strips.push({ x: sx, width: sw, canvas });
       log('  Bande ' + (i + 1) + '/' + numStrips);
     }
