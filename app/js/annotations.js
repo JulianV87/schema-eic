@@ -2139,7 +2139,17 @@ const Annotations = (() => {
     container.innerHTML = '';
 
     const categories = Store.getJSON('eic_sticker_categories', []);
-    const library = Store.getJSON('eic_image_library', []);
+    let library = Store.getJSON('eic_image_library', []);
+    // Support chunked library
+    if (library && library.chunks) {
+      let all = [];
+      for (let i = 0; i < library.chunks; i++) {
+        const chunk = Store.getJSON('eic_image_library_' + i, []);
+        all = all.concat(chunk);
+      }
+      library = all;
+    }
+    if (!Array.isArray(library)) library = [];
     if (categories.length === 0) return;
 
     categories.forEach(cat => {
