@@ -8,7 +8,21 @@
 </head>
 <body>
 
-<div id="app">
+<!-- ECRAN DE CONNEXION -->
+<div id="login-screen">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:var(--bg);font-family:var(--sans);">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:40px;max-width:360px;width:90%;text-align:center;">
+      <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">EIC Paris Nord</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:24px;">Schema de Situation</div>
+      <input type="text" id="login-user" placeholder="Identifiant" autocomplete="off" style="width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:14px;text-align:center;margin-bottom:8px;outline:none;" autofocus>
+      <input type="password" id="login-pass" placeholder="Mot de passe" autocomplete="off" style="width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:14px;text-align:center;margin-bottom:12px;outline:none;">
+      <button id="login-btn" style="width:100%;padding:10px;background:var(--accent2);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--mono);">Acceder</button>
+      <div id="login-error" style="color:var(--danger);font-size:11px;margin-top:10px;display:none;">Identifiant ou mot de passe incorrect</div>
+    </div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
   <!-- HEADER -->
   <header id="header">
     <div class="header-left">
@@ -407,6 +421,78 @@
 <!-- LIBS CDN -->
 <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.1/build/openseadragon/openseadragon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+
+<!-- AUTH -->
+<script>
+(function() {
+  const SESSION_KEY = 'eic_session';
+  const HASH_KEY = 'eic_access_hash';
+
+  // Vérifier si déjà connecté (session valide 24h)
+  const session = localStorage.getItem(SESSION_KEY);
+  if (session) {
+    try {
+      const s = JSON.parse(session);
+      if (s.expires > Date.now()) {
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('app').style.display = '';
+      }
+    } catch {}
+  }
+
+  // Hash simple du code (pas crypto-grade, juste anti-lecture directe)
+  function hashCode(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return 'h' + Math.abs(h).toString(36);
+  }
+
+  document.getElementById('login-btn').addEventListener('click', tryLogin);
+  document.getElementById('login-pass').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') tryLogin();
+  });
+  document.getElementById('login-user').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('login-pass').focus();
+  });
+
+  async function tryLogin() {
+    const user = document.getElementById('login-user').value.trim().toLowerCase();
+    const pass = document.getElementById('login-pass').value.trim();
+    if (!user || !pass) return;
+
+    const codeHash = hashCode(user + ':' + pass);
+
+    // Charger le hash attendu depuis Supabase
+    try {
+      const resp = await fetch('https://fbcwsgqrwolxnqpasbgl.supabase.co/rest/v1/config?key=eq.' + HASH_KEY + '&select=value', {
+        headers: {
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZiY3dzZ3Fyd29seG5xcGFzYmdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NDM5NDgsImV4cCI6MjA4OTUxOTk0OH0.yxadPWsLZwYbpet9wlYfTxW9Halx-XMV56PvorCKwIU',
+        },
+      });
+      const rows = await resp.json();
+      const expected = rows.length > 0 ? rows[0].value : null;
+
+      if (expected && expected.hash === codeHash) {
+        // Succès — créer une session de 24h
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ expires: Date.now() + 24 * 60 * 60 * 1000 }));
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('app').style.display = '';
+      } else {
+        document.getElementById('login-error').style.display = 'block';
+        document.getElementById('login-pass').value = '';
+        document.getElementById('login-pass').focus();
+      }
+    } catch (e) {
+      // Si Supabase est injoignable, laisser passer (mode dégradé)
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ expires: Date.now() + 24 * 60 * 60 * 1000 }));
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app').style.display = '';
+    }
+  }
+})();
+</script>
 
 <!-- APP -->
 <script src="js/sync.js"></script>
