@@ -2037,6 +2037,30 @@ const Settings = (() => {
           row.appendChild(info);
         }
 
+        // Toggle visibilité dans la sidebar (seulement pour les catégories de premier niveau)
+        if (depth === 0) {
+          const visibleCats = Store.getJSON('eic_visible_sticker_cats', null) || [];
+          const isVisible = visibleCats.includes(cat.id);
+          const eyeBtn = document.createElement('button');
+          eyeBtn.className = 'zone-item-btn';
+          eyeBtn.textContent = isVisible ? '👁' : '👁‍🗨';
+          eyeBtn.style.opacity = isVisible ? '1' : '0.3';
+          eyeBtn.title = isVisible ? 'Masquer de la sidebar' : 'Afficher dans la sidebar';
+          eyeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            let vc = Store.getJSON('eic_visible_sticker_cats', null) || [];
+            if (vc.includes(cat.id)) {
+              vc = vc.filter(id => id !== cat.id);
+            } else {
+              vc.push(cat.id);
+            }
+            Store.set('eic_visible_sticker_cats', vc);
+            subContent.innerHTML = '';
+            renderCategoriesTree();
+          });
+          row.appendChild(eyeBtn);
+        }
+
         // Bouton assigner des images
         const imgBtn = document.createElement('button');
         imgBtn.className = 'zone-item-btn';

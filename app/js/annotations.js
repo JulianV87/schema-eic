@@ -2172,14 +2172,33 @@ const Annotations = (() => {
     if (!Array.isArray(library)) library = [];
     if (categories.length === 0) return;
 
+    // Catégories visibles dans la sidebar (les autres sont masquées sauf recherche)
+    const visibleCats = Store.getJSON('eic_visible_sticker_cats', null);
+
     function renderCategories(query) {
       catWrapper.innerHTML = '';
       const q = (query || '').toLowerCase().trim();
+      const isSearch = q.length > 0;
+
       categories.forEach(cat => {
-        if (q && !categoryMatchesSearch(cat, q)) return;
+        // En mode recherche : afficher tout ce qui matche
+        if (isSearch) {
+          if (!categoryMatchesSearch(cat, q)) return;
+        } else {
+          // Sans recherche : afficher seulement les catégories visibles
+          if (visibleCats && !visibleCats.includes(cat.id)) return;
+        }
         const item = createCategoryItem(cat, library, catWrapper);
         catWrapper.appendChild(item);
       });
+
+      // Si aucune catégorie visible, afficher un message
+      if (!isSearch && catWrapper.children.length === 0) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'padding:12px;color:var(--muted);font-size:11px;text-align:center;';
+        msg.textContent = 'Aucune categorie affichee. Allez dans Parametres > Stickers > Categories pour en selectionner.';
+        catWrapper.appendChild(msg);
+      }
     }
 
     renderCategories('');
