@@ -2369,13 +2369,19 @@ const Annotations = (() => {
       flyout.style.left = (parentRight - 2) + 'px';
       flyout.style.top = (rect.top - 4) + 'px';
       document.body.appendChild(flyout);
-      // Ajuster position si hors écran
+      // Ajuster position si hors écran — toujours rester à droite
       requestAnimationFrame(() => {
         const fr = flyout.getBoundingClientRect();
         if (fr.right > window.innerWidth - 10) {
-          // Placer à gauche du parent si pas de place à droite
-          const parentLeft = parentFlyout ? parentFlyout.getBoundingClientRect().left : rect.left;
-          flyout.style.left = (parentLeft - fr.width + 2) + 'px';
+          // Réduire la largeur pour tenir à droite plutôt que passer à gauche
+          const availWidth = window.innerWidth - parentRight - 10;
+          if (availWidth > 120) {
+            flyout.style.maxWidth = availWidth + 'px';
+          } else {
+            // Vraiment pas de place : positionner sous le parent
+            flyout.style.left = parentRight - 200 + 'px';
+            flyout.style.maxWidth = '200px';
+          }
         }
         if (fr.bottom > window.innerHeight - 10) flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
       });
