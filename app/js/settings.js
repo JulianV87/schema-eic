@@ -1561,7 +1561,19 @@ const Settings = (() => {
   }
   function saveStickerCategories(cats) { Store.set('eic_sticker_categories', cats); }
 
-  function getStickerLibrary() { return Store.getJSON('eic_image_library', []); }
+  function getStickerLibrary() {
+    const data = Store.getJSON('eic_image_library', []);
+    // Support chunked library (quand > 5MB, découpé en eic_image_library_0, _1, etc.)
+    if (data && data.chunks) {
+      let all = [];
+      for (let i = 0; i < data.chunks; i++) {
+        const chunk = Store.getJSON('eic_image_library_' + i, []);
+        all = all.concat(chunk);
+      }
+      return all;
+    }
+    return Array.isArray(data) ? data : [];
+  }
   function saveStickerLibrary(lib) { Store.set('eic_image_library', lib); }
 
   function getStickers() { return Store.getJSON('eic_stickers', []); }
