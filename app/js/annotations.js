@@ -2133,10 +2133,30 @@ const Annotations = (() => {
     renderStickerCategoriesMenu();
   }
 
+  function categoryMatchesSearch(cat, query) {
+    if (cat.nom && cat.nom.toLowerCase().includes(query)) return true;
+    if (cat.children && cat.children.length > 0) {
+      return cat.children.some(child => categoryMatchesSearch(child, query));
+    }
+    return false;
+  }
+
   function renderStickerCategoriesMenu() {
     const container = document.getElementById('sticker-categories-menu');
     if (!container) return;
     container.innerHTML = '';
+
+    // Search bar
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Rechercher un EF...';
+    searchInput.className = 'sticker-search-input';
+    container.appendChild(searchInput);
+
+    // Categories wrapper (scrollable)
+    const catWrapper = document.createElement('div');
+    catWrapper.className = 'sticker-categories-list';
+    container.appendChild(catWrapper);
 
     const categories = Store.getJSON('eic_sticker_categories', []);
     let library = Store.getJSON('eic_image_library', []);
@@ -2152,9 +2172,20 @@ const Annotations = (() => {
     if (!Array.isArray(library)) library = [];
     if (categories.length === 0) return;
 
-    categories.forEach(cat => {
-      const item = createCategoryItem(cat, library, container);
-      container.appendChild(item);
+    function renderCategories(query) {
+      catWrapper.innerHTML = '';
+      const q = (query || '').toLowerCase().trim();
+      categories.forEach(cat => {
+        if (q && !categoryMatchesSearch(cat, q)) return;
+        const item = createCategoryItem(cat, library, catWrapper);
+        catWrapper.appendChild(item);
+      });
+    }
+
+    renderCategories('');
+
+    searchInput.addEventListener('input', () => {
+      renderCategories(searchInput.value);
     });
   }
 

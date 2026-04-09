@@ -1434,3 +1434,37 @@ html, body {
 .paint-section-colors {
   min-width: 0;
 }
+
+/* Sticker categories menu */
+#sticker-categories-menu {
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.sticker-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  margin-bottom: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  outline: none;
+  flex-shrink: 0;
+}
+.sticker-search-input:focus {
+  border-color: var(--accent2);
+}
+.sticker-search-input::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+.sticker-categories-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
