@@ -1585,7 +1585,7 @@ const Settings = (() => {
     // Sous-onglets
     const subTabs = document.createElement('div');
     subTabs.style.cssText = 'display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:6px;';
-    let activeSubTab = 'stickers';
+    let activeSubTab = 'images';
 
     function createSubTab(id, label) {
       const btn = document.createElement('button');
@@ -1600,7 +1600,6 @@ const Settings = (() => {
       });
       return btn;
     }
-    subTabs.appendChild(createSubTab('stickers', 'Stickers'));
     subTabs.appendChild(createSubTab('images', 'Bibliothèque'));
     subTabs.appendChild(createSubTab('categories', 'Catégories'));
     wrapper.appendChild(subTabs);
@@ -1611,99 +1610,11 @@ const Settings = (() => {
 
     function renderSubContent() {
       subContent.innerHTML = '';
-      if (activeSubTab === 'stickers') renderStickersList();
-      else if (activeSubTab === 'images') renderImageLib();
+      if (activeSubTab === 'images') renderImageLib();
       else if (activeSubTab === 'categories') renderCategoriesTree();
     }
 
-    // ========== STICKERS ==========
-    function renderStickersList() {
-      const stickers = getStickers();
-      const categories = getStickerCategories();
-
-      const addBtn = document.createElement('button');
-      addBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
-      addBtn.textContent = '+ Créer un sticker';
-      addBtn.addEventListener('click', () => showCreateStickerForm(subContent));
-      subContent.appendChild(addBtn);
-
-      if (stickers.length === 0) {
-        const empty = document.createElement('div');
-        empty.style.cssText = 'padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
-        empty.textContent = 'Aucun sticker créé';
-        subContent.appendChild(empty);
-        return;
-      }
-
-      // Grouper par catégorie
-      function findCatName(catId, cats) {
-        for (const c of cats) {
-          if (c.id === catId) return c.nom;
-          const sub = findCatName(catId, c.children || []);
-          if (sub) return sub;
-        }
-        return null;
-      }
-
-      stickers.forEach((sticker, index) => {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);';
-        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
-        row.addEventListener('mouseleave', () => row.style.background = 'none');
-
-        const icon = document.createElement('span');
-        icon.style.cssText = 'flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:3px;';
-        if (sticker.imageSrc) {
-          icon.innerHTML = '<img src="' + sticker.imageSrc + '" style="max-height:24px;max-width:28px;object-fit:contain;">';
-        }
-        row.appendChild(icon);
-
-        const name = document.createElement('span');
-        name.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        name.textContent = sticker.name;
-        row.appendChild(name);
-
-        const catName = findCatName(sticker.categoryId, categories);
-        if (catName) {
-          const badge = document.createElement('span');
-          badge.style.cssText = 'font-family:var(--mono);font-size:8px;padding:1px 5px;border:1px solid var(--border);border-radius:2px;color:var(--muted);flex-shrink:0;';
-          badge.textContent = catName;
-          row.appendChild(badge);
-        }
-
-        // Épingler
-        const pinBtn = document.createElement('button');
-        pinBtn.className = 'zone-item-btn';
-        pinBtn.textContent = sticker.pinned ? '📌' : '📍';
-        pinBtn.style.opacity = sticker.pinned ? '1' : '0.4';
-        pinBtn.title = sticker.pinned ? 'Désépingler' : 'Épingler dans la sidebar';
-        pinBtn.addEventListener('click', () => {
-          const fresh = getStickers();
-          fresh[index].pinned = !fresh[index].pinned;
-          saveStickers(fresh);
-          if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
-          renderStickersList();
-        });
-        row.appendChild(pinBtn);
-
-        const delBtn = document.createElement('button');
-        delBtn.className = 'zone-item-btn delete';
-        delBtn.textContent = '✕';
-        delBtn.addEventListener('click', () => {
-          if (!confirm('Supprimer "' + sticker.name + '" ?')) return;
-          const fresh = getStickers();
-          fresh.splice(index, 1);
-          saveStickers(fresh);
-          if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
-          renderStickersList();
-        });
-        row.appendChild(delBtn);
-
-        subContent.appendChild(row);
-      });
-    }
-
-    // Formulaire création sticker
+    // Formulaire création sticker (legacy, kept for compatibility)
     function showCreateStickerForm(container) {
       container.innerHTML = '';
       const form = document.createElement('div');
@@ -1785,7 +1696,7 @@ const Settings = (() => {
       const cancelBtn = document.createElement('button');
       cancelBtn.style.cssText = 'flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;';
       cancelBtn.textContent = 'Annuler';
-      cancelBtn.addEventListener('click', () => renderStickersList());
+      cancelBtn.addEventListener('click', () => renderImageLib());
       btnRow.appendChild(cancelBtn);
 
       const saveBtn = document.createElement('button');
@@ -1806,7 +1717,7 @@ const Settings = (() => {
         });
         saveStickers(stickers);
         if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
-        renderStickersList();
+        renderImageLib();
       });
       btnRow.appendChild(saveBtn);
       form.appendChild(btnRow);
@@ -1819,7 +1730,9 @@ const Settings = (() => {
     function renderImageLib() {
       subContent.innerHTML = '';
       const library = getStickerLibrary();
+      const categories = getStickerCategories();
 
+      // Bouton upload
       const uploadBtn = document.createElement('button');
       uploadBtn.style.cssText = 'width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border);border-radius:3px;color:var(--accent2);font-family:var(--mono);font-size:10px;cursor:pointer;margin-bottom:6px;';
       uploadBtn.textContent = '+ Ajouter des images';
@@ -1849,21 +1762,79 @@ const Settings = (() => {
       if (library.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);';
-        empty.textContent = 'Aucune image uploadée';
+        empty.textContent = 'Aucune image dans la bibliothèque';
         subContent.appendChild(empty);
         return;
       }
 
-      const grid = document.createElement('div');
-      grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
-
-      library.forEach((img, i) => {
+      // Helper: build image card for a library image (by index in library)
+      function buildImageCard(img, idxInLib) {
         const card = document.createElement('div');
         card.style.cssText = 'background:#fff;border:1px solid var(--border);border-radius:3px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;';
 
+        // Pin button (top-left)
+        const pinBtn = document.createElement('button');
+        pinBtn.style.cssText = 'position:absolute;top:2px;left:2px;background:none;border:none;font-size:11px;cursor:pointer;padding:0;line-height:1;opacity:' + (img.pinned ? '1' : '0.3') + ';';
+        pinBtn.textContent = img.pinned ? '\u2B50' : '\u2606';
+        pinBtn.title = img.pinned ? 'Retirer des favoris' : 'Ajouter aux favoris';
+        pinBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const fresh = getStickerLibrary();
+          const target = fresh.find(i => i.name === img.name);
+          if (target) target.pinned = !target.pinned;
+          saveStickerLibrary(fresh);
+          // Also sync eic_stickers for sidebar
+          syncPinnedToStickers(fresh);
+          renderImageLib();
+        });
+        card.appendChild(pinBtn);
+
+        // Rename button (top-right, next to delete)
+        const renameBtn = document.createElement('button');
+        renameBtn.style.cssText = 'position:absolute;top:2px;right:20px;background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:9px;cursor:pointer;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
+        renameBtn.textContent = '\u270E';
+        renameBtn.title = 'Renommer';
+        renameBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const newName = prompt('Nouveau nom :', img.name);
+          if (!newName || !newName.trim() || newName.trim() === img.name) return;
+          const oldName = img.name;
+          const fresh = getStickerLibrary();
+          const target = fresh.find(i => i.name === oldName);
+          if (target) target.name = newName.trim();
+          saveStickerLibrary(fresh);
+          // Update references in categories
+          const cats = getStickerCategories();
+          renameCatImage(cats, oldName, newName.trim());
+          saveStickerCategories(cats);
+          // Update eic_stickers references
+          const stickers = getStickers();
+          stickers.forEach(s => { if (s.name === oldName) s.name = newName.trim(); });
+          saveStickers(stickers);
+          if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
+          renderImageLib();
+        });
+        card.appendChild(renameBtn);
+
+        // Delete button (top-right)
+        const del = document.createElement('button');
+        del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:10px;cursor:pointer;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
+        del.textContent = '\u2715';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!confirm('Supprimer "' + img.name + '" ?')) return;
+          const fresh = getStickerLibrary();
+          const idx = fresh.findIndex(i => i.name === img.name);
+          if (idx >= 0) fresh.splice(idx, 1);
+          saveStickerLibrary(fresh);
+          syncPinnedToStickers(fresh);
+          renderImageLib();
+        });
+        card.appendChild(del);
+
         const imgEl = document.createElement('img');
         imgEl.src = img.dataUrl;
-        imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;';
+        imgEl.style.cssText = 'max-height:45px;max-width:100%;object-fit:contain;margin-top:4px;';
         card.appendChild(imgEl);
 
         const label = document.createElement('span');
@@ -1871,21 +1842,122 @@ const Settings = (() => {
         label.textContent = img.name;
         card.appendChild(label);
 
-        const del = document.createElement('button');
-        del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);border:none;color:#ff4040;font-size:10px;cursor:pointer;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;';
-        del.textContent = '✕';
-        del.addEventListener('click', () => {
-          if (!confirm('Supprimer "' + img.name + '" ?')) return;
-          const fresh = getStickerLibrary();
-          fresh.splice(i, 1);
-          saveStickerLibrary(fresh);
-          renderImageLib();
-        });
-        card.appendChild(del);
+        return card;
+      }
 
-        grid.appendChild(card);
-      });
-      subContent.appendChild(grid);
+      // Helper: rename image in category tree
+      function renameCatImage(cats, oldName, newName) {
+        cats.forEach(cat => {
+          if (cat.images) {
+            const idx = cat.images.indexOf(oldName);
+            if (idx >= 0) cat.images[idx] = newName;
+          }
+          if (cat.children) renameCatImage(cat.children, oldName, newName);
+        });
+      }
+
+      // Sync pinned library images to eic_stickers for sidebar quick access
+      function syncPinnedToStickers(lib) {
+        const stickers = getStickers();
+        // Remove stickers whose source image is no longer pinned
+        const pinnedNames = new Set(lib.filter(i => i.pinned).map(i => i.name));
+        const filtered = stickers.filter(s => !s._fromPin || pinnedNames.has(s.name));
+        // Add missing pinned images as stickers
+        lib.filter(i => i.pinned).forEach(img => {
+          if (!filtered.find(s => s._fromPin && s.name === img.name)) {
+            filtered.push({
+              id: 'sticker-pin-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+              name: img.name,
+              imageSrc: img.dataUrl,
+              categoryId: '',
+              pinned: true,
+              _fromPin: true,
+            });
+          }
+        });
+        saveStickers(filtered);
+        if (typeof Annotations !== 'undefined' && Annotations.renderPinnedAnnotations) Annotations.renderPinnedAnnotations();
+      }
+
+      // Collect images assigned to categories
+      const assignedImages = new Set();
+      function collectAssigned(cats) {
+        cats.forEach(cat => {
+          (cat.images || []).forEach(name => assignedImages.add(name));
+          if (cat.children) collectAssigned(cat.children);
+        });
+      }
+      collectAssigned(categories);
+
+      // --- Section: Favoris (pinned images) ---
+      const pinnedImages = library.filter(img => img.pinned);
+      if (pinnedImages.length > 0) {
+        const section = document.createElement('div');
+        section.style.cssText = 'margin-bottom:8px;';
+        const header = document.createElement('div');
+        header.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;padding:4px 0 3px 0;border-bottom:1px solid var(--border);margin-bottom:4px;';
+        header.textContent = '\u2B50 Favoris';
+        section.appendChild(header);
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
+        pinnedImages.forEach((img, i) => {
+          const idx = library.indexOf(img);
+          grid.appendChild(buildImageCard(img, idx));
+        });
+        section.appendChild(grid);
+        subContent.appendChild(section);
+      }
+
+      // --- Sections by category ---
+      function renderCatSection(cat, depth) {
+        const catImages = (cat.images || []).map(name => library.find(i => i.name === name)).filter(Boolean);
+        const hasChildren = cat.children && cat.children.length > 0;
+        if (catImages.length === 0 && !hasChildren) return;
+
+        const section = document.createElement('div');
+        section.style.cssText = 'margin-bottom:8px;margin-left:' + (depth * 8) + 'px;';
+        const header = document.createElement('div');
+        header.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;padding:4px 0 3px 0;border-bottom:1px solid var(--border);margin-bottom:4px;';
+        header.textContent = cat.nom + (catImages.length > 0 ? ' (' + catImages.length + ')' : '');
+        section.appendChild(header);
+
+        if (catImages.length > 0) {
+          const grid = document.createElement('div');
+          grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
+          catImages.forEach(img => {
+            const idx = library.indexOf(img);
+            grid.appendChild(buildImageCard(img, idx));
+          });
+          section.appendChild(grid);
+        }
+
+        subContent.appendChild(section);
+
+        if (hasChildren) {
+          cat.children.forEach(child => renderCatSection(child, depth + 1));
+        }
+      }
+
+      categories.forEach(cat => renderCatSection(cat, 0));
+
+      // --- Section: Non classées (images not assigned to any category) ---
+      const unassigned = library.filter(img => !assignedImages.has(img.name));
+      if (unassigned.length > 0) {
+        const section = document.createElement('div');
+        section.style.cssText = 'margin-bottom:8px;';
+        const header = document.createElement('div');
+        header.style.cssText = 'font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;padding:4px 0 3px 0;border-bottom:1px solid var(--border);margin-bottom:4px;';
+        header.textContent = 'Non class\u00e9es (' + unassigned.length + ')';
+        section.appendChild(header);
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;';
+        unassigned.forEach(img => {
+          const idx = library.indexOf(img);
+          grid.appendChild(buildImageCard(img, idx));
+        });
+        section.appendChild(grid);
+        subContent.appendChild(section);
+      }
     }
 
     // ========== CATÉGORIES ==========
