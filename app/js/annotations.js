@@ -2361,16 +2361,22 @@ const Annotations = (() => {
       });
       // Fermer les flyouts de niveaux >= level
       closeFlyoutsFrom(level);
-      // Ouvrir le nouveau flyout
+      // Ouvrir le nouveau flyout — positionné à droite du flyout parent
       const flyout = buildFlyoutContent(cat, library, level);
       const rect = row.getBoundingClientRect();
-      flyout.style.left = (rect.right - 2) + 'px';
+      const parentFlyout = row.closest('.sticker-flyout');
+      const parentRight = parentFlyout ? parentFlyout.getBoundingClientRect().right : rect.right;
+      flyout.style.left = (parentRight - 2) + 'px';
       flyout.style.top = (rect.top - 4) + 'px';
       document.body.appendChild(flyout);
       // Ajuster position si hors écran
       requestAnimationFrame(() => {
         const fr = flyout.getBoundingClientRect();
-        if (fr.right > window.innerWidth - 10) flyout.style.left = (rect.left - fr.width + 2) + 'px';
+        if (fr.right > window.innerWidth - 10) {
+          // Placer à gauche du parent si pas de place à droite
+          const parentLeft = parentFlyout ? parentFlyout.getBoundingClientRect().left : rect.left;
+          flyout.style.left = (parentLeft - fr.width + 2) + 'px';
+        }
         if (fr.bottom > window.innerHeight - 10) flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
       });
       activeFlyoutChain[level] = { flyout, closeTimeout: null };
