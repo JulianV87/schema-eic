@@ -2417,15 +2417,20 @@ const Annotations = (() => {
       });
       // Fermer tous les flyouts existants
       closeAllFlyouts();
-      // Ouvrir le flyout de niveau 0
+      // Ouvrir le flyout de niveau 0 — toujours à droite de la sidebar
       const flyout = buildFlyoutContent(cat, library, 0);
       const rect = row.getBoundingClientRect();
-      flyout.style.left = (rect.right - 2) + 'px';
+      const sidebar = document.getElementById('sidebar');
+      const sidebarRight = sidebar ? sidebar.getBoundingClientRect().right : rect.right;
+      flyout.style.left = sidebarRight + 'px';
       flyout.style.top = (rect.top - 4) + 'px';
       document.body.appendChild(flyout);
       requestAnimationFrame(() => {
         const fr = flyout.getBoundingClientRect();
-        if (fr.right > window.innerWidth - 10) flyout.style.left = (rect.left - fr.width + 2) + 'px';
+        if (fr.right > window.innerWidth - 10) {
+          flyout.style.left = (sidebarRight) + 'px';
+          flyout.style.maxWidth = (window.innerWidth - sidebarRight - 10) + 'px';
+        }
         if (fr.bottom > window.innerHeight - 10) flyout.style.top = Math.max(10, window.innerHeight - fr.height - 10) + 'px';
       });
       activeFlyoutChain[0] = { flyout, closeTimeout: null };
