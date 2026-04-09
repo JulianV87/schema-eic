@@ -559,13 +559,36 @@ const Export = (() => {
     }
   }
 
-  function exportToPNG(canvas) {
+  async function exportToPNG(canvas) {
     const now = new Date();
     const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const zone = Viewer.getCurrentZone();
     const name = zone ? zone.nom.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '_') : 'schema';
+    const filename = `EIC_${name}_${ts}.png`;
+
+    // File System Access API (Chrome/Edge) — native "Save As" dialog
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'Image PNG', accept: { 'image/png': ['.png'] } }],
+        });
+        const blob = await new Promise((resolve, reject) => {
+          canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/png');
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return; // user cancelled
+        console.warn('showSaveFilePicker failed, fallback download:', err);
+      }
+    }
+
+    // Fallback classique (Firefox, etc.)
     const link = document.createElement('a');
-    link.download = `EIC_${name}_${ts}.png`;
+    link.download = filename;
     link.href = canvas.toDataURL('image/png');
     link.click();
   }
