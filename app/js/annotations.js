@@ -2172,31 +2172,74 @@ const Annotations = (() => {
     if (!Array.isArray(library)) library = [];
     if (categories.length === 0) return;
 
-    // Catégories visibles dans la sidebar (les autres sont masquées sauf recherche)
-    const visibleCats = Store.getJSON('eic_visible_sticker_cats', null);
+    let editMode = false;
+
+    // Bouton pour basculer en mode édition (masquer/afficher)
+    const editBtn = document.createElement('button');
+    editBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:10px;cursor:pointer;padding:2px 8px;margin-bottom:2px;font-family:var(--mono);width:100%;text-align:right;';
+    editBtn.textContent = 'Gerer';
+    editBtn.addEventListener('click', () => {
+      editMode = !editMode;
+      editBtn.textContent = editMode ? 'Terminer' : 'Gerer';
+      editBtn.style.color = editMode ? 'var(--accent2)' : 'var(--muted)';
+      renderCategories(searchInput.value);
+    });
+    container.insertBefore(editBtn, catWrapper);
 
     function renderCategories(query) {
       catWrapper.innerHTML = '';
       const q = (query || '').toLowerCase().trim();
       const isSearch = q.length > 0;
+      const visibleCats = Store.getJSON('eic_visible_sticker_cats', null);
 
       categories.forEach(cat => {
-        // En mode recherche : afficher tout ce qui matche
         if (isSearch) {
           if (!categoryMatchesSearch(cat, q)) return;
-        } else {
-          // Sans recherche : afficher seulement les catégories visibles
+        } else if (!editMode) {
+          // Sans recherche et hors mode édition : seulement les visibles
           if (visibleCats && !visibleCats.includes(cat.id)) return;
         }
-        const item = createCategoryItem(cat, library, catWrapper);
-        catWrapper.appendChild(item);
+
+        if (editMode && !isSearch) {
+          // Mode édition : afficher toutes les catégories avec toggle
+          const isVisible = !visibleCats || visibleCats.includes(cat.id);
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;font-family:var(--mono);font-size:10px;color:var(--text);opacity:' + (isVisible ? '1' : '0.4') + ';cursor:pointer;border-radius:3px;';
+          row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+          row.addEventListener('mouseleave', () => row.style.background = 'none');
+
+          const eye = document.createElement('span');
+          eye.textContent = isVisible ? '◉' : '○';
+          eye.style.cssText = 'color:' + (isVisible ? 'var(--accent2)' : 'var(--muted)') + ';font-size:12px;flex-shrink:0;';
+          row.appendChild(eye);
+
+          const label = document.createElement('span');
+          label.textContent = cat.nom;
+          label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+          row.appendChild(label);
+
+          row.addEventListener('click', () => {
+            let vc = Store.getJSON('eic_visible_sticker_cats', null) || [];
+            if (vc.includes(cat.id)) {
+              vc = vc.filter(id => id !== cat.id);
+            } else {
+              vc.push(cat.id);
+            }
+            Store.set('eic_visible_sticker_cats', vc);
+            renderCategories(query);
+          });
+
+          catWrapper.appendChild(row);
+        } else {
+          const item = createCategoryItem(cat, library, catWrapper);
+          catWrapper.appendChild(item);
+        }
       });
 
-      // Si aucune catégorie visible, afficher un message
-      if (!isSearch && catWrapper.children.length === 0) {
+      if (!isSearch && !editMode && catWrapper.children.length === 0) {
         const msg = document.createElement('div');
         msg.style.cssText = 'padding:12px;color:var(--muted);font-size:11px;text-align:center;';
-        msg.textContent = 'Aucune categorie affichee. Allez dans Parametres > Stickers > Categories pour en selectionner.';
+        msg.textContent = 'Cliquez "Gerer" pour choisir les categories a afficher.';
         catWrapper.appendChild(msg);
       }
     }
