@@ -43,6 +43,7 @@
       <button id="btn-export-png" title="Télécharger PNG">Export</button>
       <button id="btn-clear" title="Effacer toutes les annotations">Effacer</button>
       <button id="btn-calibrate" title="Mode calibration — pointer les éléments sur le schéma">Calibrer</button>
+      <button id="btn-logout" title="Se déconnecter" style="color:var(--muted);font-size:11px;">Quitter</button>
     </div>
   </header>
 
@@ -491,6 +492,19 @@
       document.getElementById('app').style.display = '';
     }
   }
+
+  // Bouton déconnexion
+  document.addEventListener('DOMContentLoaded', () => {
+    const logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', () => {
+        if (confirm('Se deconnecter ?')) {
+          localStorage.removeItem(SESSION_KEY);
+          location.reload();
+        }
+      });
+    }
+  });
 })();
 </script>
 
