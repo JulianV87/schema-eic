@@ -101,6 +101,54 @@ const Search = (() => {
       if (gareCategoriesPopup) { closeGareCategoriesPopup(); return; }
       if (scenariosPopup) closeScenariosPopup();
     });
+    // Migration une-fois : reclasse les anciens scénarios Paris-Nord
+    try { migrateParisBagageV1(); } catch (e) { console.warn('Migration Paris bagage:', e.message); }
+  }
+
+  // Migration idempotente : crée les 2 sous-catégories pour Paris-Nord et
+  // reclasse les scénarios "Colis suspect" selon le préfixe de leur nom.
+  // Gated par un flag persistant dans le Store (Supabase) → ne se rejoue pas.
+  function migrateParisBagageV1() {
+    if (Store.getJSON('eic_migration_paris_bagage_v1', null) === true) return;
+
+    const gares = (typeof Data !== 'undefined' && Data.getGares) ? Data.getGares() : [];
+    if (!gares.length) return; // Data pas encore prêt, on réessaiera au prochain chargement
+    const paris = gares.find(g => /paris[\s\-]?nord/i.test(g.nom || ''));
+    if (!paris) return;
+
+    const SUB_TRAIN = 'Bagage oublié à bord d\'un train';
+    const SUB_QUAI = 'Bagage oublié à quai';
+
+    // Ajouter les deux sous-catégories à la liste stockée (sans toucher aux déduites)
+    const all = Store.getJSON('eic_subcategories', {}) || {};
+    const stored = Array.isArray(all[paris.id]) ? all[paris.id].slice() : [];
+    let catsChanged = false;
+    if (!stored.includes(SUB_TRAIN)) { stored.push(SUB_TRAIN); catsChanged = true; }
+    if (!stored.includes(SUB_QUAI))  { stored.push(SUB_QUAI);  catsChanged = true; }
+    if (catsChanged) saveSubcategoriesForGare(paris.id, stored);
+
+    // Reclasser les scénarios "Colis suspect" de Paris-Nord
+    const scs = getSavedScenarios();
+    let touched = 0;
+    scs.forEach(s => {
+      if (s.gareId !== paris.id) return;
+      if (normalizeSubcat(s) !== 'Colis suspect') return;
+      const name = (s.name || '').trim();
+      // "voie 3", "voie 5", "Voie3", etc. → à bord d'un train
+      if (/^voie\b/i.test(name) || /^voie\s*\d/i.test(name)) {
+        s.subcategory = SUB_TRAIN;
+        touched++;
+      // "bagage oublié …" → à quai (tolère é/e/è et espaces multiples)
+      } else if (/^bagage\s+oubli[éeè]/i.test(name)) {
+        s.subcategory = SUB_QUAI;
+        touched++;
+      }
+    });
+    if (touched > 0) saveScenariosList(scs);
+
+    // Poser le flag pour ne plus rejouer la migration
+    Store.set('eic_migration_paris_bagage_v1', true);
+    console.log('Migration Paris bagage v1 : ' + touched + ' scénario(s) reclassé(s).');
   }
 
   function getSavedScenarios() {
