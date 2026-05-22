@@ -339,12 +339,9 @@ const Calibrate = (() => {
       }
     }
 
-    // DEBUG — tracer la résolution de desserte
-    console.log('=== SAVE ELEMENT DEBUG ===');
-    console.log('gareName saisie:', JSON.stringify(gareName));
-    console.log('gareId résolu:', gareId);
-    console.log('previousGareId:', previousGareId);
-    if (gareName) {
+    // Tracer la résolution de desserte uniquement si debug activé
+    if (window.EIC_DEBUG && gareName) {
+      console.log('SAVE ELEMENT DEBUG', { gareName, gareId, previousGareId });
       const norm2 = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-''\.]/g, ' ').replace(/\s+/g, ' ').trim();
       console.log('gareName normalisé:', JSON.stringify(norm2(gareName)));
       const dessertes = Data.getAllDessertes();
@@ -353,7 +350,6 @@ const Calibrate = (() => {
         if (norm2(d.nom).includes('paris')) console.log('  -', id, '→', d.nom, '→ norm:', JSON.stringify(norm2(d.nom)));
       });
     }
-    console.log('=========================');
 
     const id = editId || Data.generateId();
 
@@ -415,10 +411,7 @@ const Calibrate = (() => {
     try {
       const settingsPopup = document.getElementById('settings-popup');
       if (settingsPopup && !settingsPopup.classList.contains('hidden')) {
-        console.log('Rafraîchissement paramètres...');
         Settings.renderTab(null);
-      } else {
-        console.log('Paramètres fermés, pas de rafraîchissement');
       }
     } catch (e) {
       console.error('Erreur rafraîchissement paramètres:', e);
@@ -1203,7 +1196,11 @@ const Calibrate = (() => {
     items.forEach(a => {
       const el = document.createElement('div');
       el.style.cssText = `padding:7px 12px;cursor:pointer;color:${a.danger ? '#ff4040' : '#c8daf5'};display:flex;align-items:center;gap:8px;transition:background 0.1s;`;
-      el.innerHTML = `<span style="width:18px;text-align:center;font-size:11px;">${a.icon}</span>${a.label}`;
+      const iconSpan = document.createElement('span');
+      iconSpan.style.cssText = 'width:18px;text-align:center;font-size:11px;';
+      iconSpan.textContent = a.icon;
+      el.appendChild(iconSpan);
+      el.appendChild(document.createTextNode(a.label));
       el.addEventListener('mouseenter', () => { el.style.background = '#111a2e'; });
       el.addEventListener('mouseleave', () => { el.style.background = 'none'; });
       el.addEventListener('click', () => { menu.remove(); a.action(); });

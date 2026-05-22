@@ -339,7 +339,11 @@ const Settings = (() => {
       const el = document.createElement('div');
       el.className = 'add-menu-item';
       if (a.danger) el.style.color = 'var(--danger)';
-      el.innerHTML = `<span style="display:inline-block;width:18px;text-align:center;margin-right:4px;font-size:11px;">${a.icon}</span>${a.label}`;
+      const iconSpan = document.createElement('span');
+      iconSpan.style.cssText = 'display:inline-block;width:18px;text-align:center;margin-right:4px;font-size:11px;';
+      iconSpan.textContent = a.icon;
+      el.appendChild(iconSpan);
+      el.appendChild(document.createTextNode(a.label));
       el.addEventListener('click', () => { menu.remove(); a.action(); });
       menu.appendChild(el);
     });
@@ -491,11 +495,15 @@ const Settings = (() => {
         item.style.gap = '6px';
         item.style.paddingLeft = '20px';
 
-        if (alreadyIn) {
-          item.innerHTML = `<span style="width:14px;text-align:center;color:var(--accent2);">✓</span><span style="flex:1">${l.nom}</span>`;
-        } else {
-          item.innerHTML = `<span style="width:14px;text-align:center;color:var(--border2);">○</span><span style="flex:1">${l.nom}</span>`;
-        }
+        const iconSpan = document.createElement('span');
+        iconSpan.style.cssText = 'width:14px;text-align:center;';
+        iconSpan.style.color = alreadyIn ? 'var(--accent2)' : 'var(--border2)';
+        iconSpan.textContent = alreadyIn ? '✓' : '○';
+        const labelSpan = document.createElement('span');
+        labelSpan.style.flex = '1';
+        labelSpan.textContent = l.nom;
+        item.appendChild(iconSpan);
+        item.appendChild(labelSpan);
 
         item.addEventListener('click', () => {
           const freshLayout = getLayout();
@@ -570,11 +578,14 @@ const Settings = (() => {
         item.style.alignItems = 'center';
         item.style.gap = '6px';
 
-        if (alreadyIn) {
-          item.innerHTML = `<span style="width:14px;text-align:center;color:var(--accent2);">✓</span>${l.nom}`;
-        } else {
-          item.innerHTML = `<span style="width:14px;text-align:center;color:var(--border2);">○</span>${l.nom}`;
-        }
+        const iconSpan2 = document.createElement('span');
+        iconSpan2.style.cssText = 'width:14px;text-align:center;';
+        iconSpan2.style.color = alreadyIn ? 'var(--accent2)' : 'var(--border2)';
+        iconSpan2.textContent = alreadyIn ? '✓' : '○';
+        const labelSpan2 = document.createElement('span');
+        labelSpan2.textContent = l.nom;
+        item.appendChild(iconSpan2);
+        item.appendChild(labelSpan2);
 
         item.addEventListener('click', () => {
           const freshLayout = getLayout();

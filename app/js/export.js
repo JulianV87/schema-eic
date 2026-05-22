@@ -13,6 +13,29 @@ const Export = (() => {
   let dragStart = null;
   let currentRect = null;
 
+  // Spinner global d'export (affiché pendant toBlob / clipboard write)
+  function showSpinner(msg) {
+    let sp = document.getElementById('export-spinner');
+    if (!sp) {
+      sp = document.createElement('div');
+      sp.id = 'export-spinner';
+      sp.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(6,9,15,0.6);font-family:"JetBrains Mono",monospace;font-size:13px;color:#c8daf5;letter-spacing:0.5px;';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#0c1220;border:1px solid #2a4266;border-radius:8px;padding:20px 32px;box-shadow:0 8px 24px rgba(0,0,0,0.6);';
+      box.textContent = msg || 'Export en cours…';
+      sp.appendChild(box);
+      document.body.appendChild(sp);
+    } else {
+      sp.firstChild.textContent = msg || 'Export en cours…';
+      sp.style.display = 'flex';
+    }
+  }
+
+  function hideSpinner() {
+    const sp = document.getElementById('export-spinner');
+    if (sp) sp.style.display = 'none';
+  }
+
   // Forme libre
   let freePoints = [];
   let isDrawingFree = false;
@@ -21,9 +44,11 @@ const Export = (() => {
 
   function init() {
     const pngBtn = document.getElementById('btn-export-png');
+    const clipBtn = document.getElementById('btn-export-clipboard');
     const clearBtn = document.getElementById('btn-clear');
 
     if (pngBtn) pngBtn.addEventListener('click', () => showShapeMenu('png'));
+    if (clipBtn) clipBtn.addEventListener('click', () => showShapeMenu('clipboard'));
     if (clearBtn) clearBtn.addEventListener('click', confirmClear);
   }
 
@@ -75,7 +100,11 @@ const Export = (() => {
     shapes.forEach(s => {
       const item = document.createElement('div');
       item.style.cssText = 'padding:8px 12px; cursor:pointer; color:#c8daf5; display:flex; align-items:center; gap:8px; transition:background 0.1s;';
-      item.innerHTML = `<span style="width:16px;text-align:center;font-size:14px;">${s.icon}</span> ${s.label}`;
+      const iconSpan = document.createElement('span');
+      iconSpan.style.cssText = 'width:16px;text-align:center;font-size:14px;';
+      iconSpan.textContent = s.icon;
+      item.appendChild(iconSpan);
+      item.appendChild(document.createTextNode(' ' + s.label));
       item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
       item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
       item.addEventListener('click', (e) => {
@@ -540,6 +569,7 @@ const Export = (() => {
   }
 
   async function exportToClipboard(canvas) {
+    showSpinner('Copie dans le presse-papier…');
     try {
       const blob = await new Promise((resolve, reject) => {
         canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/png');
@@ -555,7 +585,11 @@ const Export = (() => {
       }
     } catch (err) {
       console.error('Erreur clipboard:', err);
+      hideSpinner();
       exportToPNG(canvas);
+      return;
+    } finally {
+      hideSpinner();
     }
   }
 
@@ -568,29 +602,44 @@ const Export = (() => {
 
     // File System Access API (Chrome/Edge) — native "Save As" dialog
     if (window.showSaveFilePicker) {
+      let handle;
       try {
-        const handle = await window.showSaveFilePicker({
+        handle = await window.showSaveFilePicker({
           suggestedName: filename,
           types: [{ description: 'Image PNG', accept: { 'image/png': ['.png'] } }],
         });
-        const blob = await new Promise((resolve, reject) => {
-          canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/png');
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return;
       } catch (err) {
         if (err.name === 'AbortError') return; // user cancelled
         console.warn('showSaveFilePicker failed, fallback download:', err);
       }
+      if (handle) {
+        showSpinner('Génération PNG…');
+        try {
+          const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/png');
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (err) {
+          console.warn('Écriture PNG échouée, fallback download:', err);
+        } finally {
+          hideSpinner();
+        }
+      }
     }
 
     // Fallback classique (Firefox, etc.)
-    const link = document.createElement('a');
-    link.download = filename;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    showSpinner('Génération PNG…');
+    try {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } finally {
+      hideSpinner();
+    }
   }
 
   return { init };

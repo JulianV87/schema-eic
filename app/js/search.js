@@ -46,8 +46,12 @@ const Search = (() => {
       }
     });
 
+    // Debounce 150ms — évite un re-render à chaque caractère tapé
+    let suggestTimer = null;
     commandBar.addEventListener('input', () => {
-      showSuggestions(commandBar.value);
+      if (suggestTimer) clearTimeout(suggestTimer);
+      const val = commandBar.value;
+      suggestTimer = setTimeout(() => showSuggestions(val), 150);
     });
 
     commandBar.addEventListener('blur', () => {
@@ -77,6 +81,1011 @@ const Search = (() => {
 
     // Resize de la barre du bas
     setupBarResize();
+
+    // Scénarios (save/load de configurations d'annotations)
+    setupScenarios();
+  }
+
+  // === SCÉNARIOS ===
+  let scenariosPopup = null;
+  let gareCategoriesPopup = null;
+  let gareScenariosPopup = null;
+
+  function setupScenarios() {
+    const btn = document.getElementById('btn-scenarios');
+    if (btn) btn.addEventListener('click', openScenariosPopup);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (scenarioConfigurator) { closeConfigurator(); return; }
+      if (gareScenariosPopup) { closeGareScenariosPopup(); return; }
+      if (gareCategoriesPopup) { closeGareCategoriesPopup(); return; }
+      if (scenariosPopup) closeScenariosPopup();
+    });
+  }
+
+  function getSavedScenarios() {
+    return Store.getJSON('eic_scenarios', []) || [];
+  }
+
+  function saveScenariosList(list) {
+    Store.set('eic_scenarios', list);
+  }
+
+  // Catégorie d'un scénario (rétro-compat : absence → 'colis-suspect' par défaut,
+  // puisque c'est la seule catégorie disponible aujourd'hui)
+  function scenarioCategory(sc) {
+    return sc.category || 'colis-suspect';
+  }
+
+  // Nom de sous-catégorie affichable pour un scénario (migration douce des legacy)
+  function normalizeSubcat(sc) {
+    if (sc.subcategory) return sc.subcategory;
+    if (sc.category === 'colis-suspect' || !sc.category) return 'Colis suspect';
+    return sc.category;
+  }
+
+  // Sous-catégories configurées + celles présentes dans les scénarios (fusion sans doublons)
+  function getSubcategoriesForGare(gareId) {
+    const all = Store.getJSON('eic_subcategories', {}) || {};
+    const stored = Array.isArray(all[gareId]) ? all[gareId].slice() : [];
+    const scs = getSavedScenarios().filter(s => s.gareId === gareId);
+    const fromData = [];
+    scs.forEach(s => {
+      const n = normalizeSubcat(s);
+      if (n && !fromData.includes(n)) fromData.push(n);
+    });
+    const merged = [];
+    stored.concat(fromData).forEach(n => { if (n && !merged.includes(n)) merged.push(n); });
+    // Garantir au moins la sous-cat par défaut si la gare a des scénarios legacy
+    if (merged.length === 0 && scs.length > 0) merged.push('Colis suspect');
+    return merged;
+  }
+
+  function saveSubcategoriesForGare(gareId, list) {
+    const all = Store.getJSON('eic_subcategories', {}) || {};
+    all[gareId] = list.slice();
+    Store.set('eic_subcategories', all);
+  }
+
+  function countScenariosForGareSubcat(gareId, subcat) {
+    return getSavedScenarios().filter(s => s.gareId === gareId && normalizeSubcat(s) === subcat).length;
+  }
+
+  function renameSubcategory(gareId, oldName, newName) {
+    if (!newName || oldName === newName) return;
+    // Mettre à jour la liste configurée
+    const list = getSubcategoriesForGare(gareId).map(n => n === oldName ? newName : n);
+    // Dédupliquer si fusion
+    const dedup = [];
+    list.forEach(n => { if (!dedup.includes(n)) dedup.push(n); });
+    saveSubcategoriesForGare(gareId, dedup);
+    // Cascade sur les scénarios
+    const scs = getSavedScenarios();
+    let touched = false;
+    scs.forEach(s => {
+      if (s.gareId === gareId && normalizeSubcat(s) === oldName) {
+        s.subcategory = newName;
+        touched = true;
+      }
+    });
+    if (touched) saveScenariosList(scs);
+  }
+
+  function deleteSubcategory(gareId, name) {
+    const scsCount = countScenariosForGareSubcat(gareId, name);
+    if (scsCount > 0) {
+      if (!confirm('Supprimer la sous-catégorie "' + name + '" ET ses ' + scsCount + ' scénario' + (scsCount > 1 ? 's' : '') + ' ?')) return false;
+    } else {
+      if (!confirm('Supprimer la sous-catégorie "' + name + '" ?')) return false;
+    }
+    // Supprimer de la liste
+    const list = getSubcategoriesForGare(gareId).filter(n => n !== name);
+    saveSubcategoriesForGare(gareId, list);
+    // Supprimer les scénarios associés
+    const scs = getSavedScenarios().filter(s => !(s.gareId === gareId && normalizeSubcat(s) === name));
+    saveScenariosList(scs);
+    return true;
+  }
+
+  function addSubcategory(gareId, name) {
+    name = (name || '').trim();
+    if (!name) return false;
+    const list = getSubcategoriesForGare(gareId);
+    if (list.includes(name)) { alert('Cette sous-catégorie existe déjà.'); return false; }
+    list.push(name);
+    saveSubcategoriesForGare(gareId, list);
+    return true;
+  }
+
+  // Popup principal : tableau des gares avec compteur de scénarios "Colis suspect"
+  function openScenariosPopup() {
+    if (scenariosPopup) { closeScenariosPopup(); return; }
+    const popup = document.createElement('div');
+    popup.id = 'scenarios-popup';
+    popup.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:500;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,0.7);width:420px;max-width:92vw;font-family:var(--mono);display:flex;flex-direction:column;max-height:80vh;';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;';
+    const title = document.createElement('div');
+    title.style.cssText = 'flex:1;';
+    const titleSm = document.createElement('div');
+    titleSm.style.cssText = 'font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;';
+    titleSm.textContent = 'Scénarios';
+    const titleLg = document.createElement('div');
+    titleLg.style.cssText = 'font-size:14px;color:var(--text);font-weight:600;margin-top:2px;';
+    titleLg.textContent = 'Colis suspect';
+    title.appendChild(titleSm);
+    title.appendChild(titleLg);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeScenariosPopup);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // Corps : tableau des gares
+    const body = document.createElement('div');
+    body.style.cssText = 'overflow-y:auto;flex:1;';
+    popup.appendChild(body);
+
+    function renderTable() {
+      body.textContent = '';
+      const scenarios = getSavedScenarios();
+      const countByGare = {};
+      const orphans = [];
+      scenarios.forEach(sc => {
+        if (sc.gareId) {
+          countByGare[sc.gareId] = (countByGare[sc.gareId] || 0) + 1;
+        } else {
+          orphans.push(sc);
+        }
+      });
+
+      // Filtre temporaire : n'afficher que Paris-Nord pour le moment
+      // (la liste complète des gares EIC sera réintroduite quand d'autres scénarios seront créés)
+      const allGares = (typeof Data !== 'undefined' && Data.getGares) ? Data.getGares() : [];
+      const gares = allGares.filter(g => /paris[\s\-]?nord/i.test(g.nom || ''));
+      gares.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+
+      if (gares.length === 0 && orphans.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:20px;text-align:center;color:var(--muted);font-size:11px;';
+        empty.textContent = 'Aucune gare disponible';
+        body.appendChild(empty);
+        return;
+      }
+
+      gares.forEach(g => {
+        const n = countByGare[g.id] || 0;
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = '');
+        const nameEl = document.createElement('div');
+        nameEl.style.cssText = 'flex:1;color:var(--text);font-weight:' + (n > 0 ? '600' : '400') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        nameEl.textContent = g.nom;
+        const countEl = document.createElement('div');
+        countEl.style.cssText = 'color:' + (n > 0 ? 'var(--accent2)' : 'var(--muted)') + ';font-size:11px;';
+        countEl.textContent = n > 0 ? (n + ' scénario' + (n > 1 ? 's' : '')) : '—';
+        const arrow = document.createElement('div');
+        arrow.style.cssText = 'color:var(--muted);font-size:11px;';
+        arrow.textContent = '▸';
+        row.appendChild(nameEl);
+        row.appendChild(countEl);
+        row.appendChild(arrow);
+        row.addEventListener('click', () => openGareCategoriesPopup(g));
+        body.appendChild(row);
+      });
+
+      // Section "Non classés" (rétro-compat pour les anciens scénarios sans gareId)
+      if (orphans.length > 0) {
+        const orphanRow = document.createElement('div');
+        orphanRow.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;background:rgba(255,255,255,0.02);';
+        orphanRow.addEventListener('mouseenter', () => orphanRow.style.background = 'var(--surface2)');
+        orphanRow.addEventListener('mouseleave', () => orphanRow.style.background = 'rgba(255,255,255,0.02)');
+        const nameEl = document.createElement('div');
+        nameEl.style.cssText = 'flex:1;color:var(--muted);font-style:italic;';
+        nameEl.textContent = 'Non classés';
+        const countEl = document.createElement('div');
+        countEl.style.cssText = 'color:var(--muted);font-size:11px;';
+        countEl.textContent = orphans.length + ' scénario' + (orphans.length > 1 ? 's' : '');
+        const arrow = document.createElement('div');
+        arrow.style.cssText = 'color:var(--muted);font-size:11px;';
+        arrow.textContent = '▸';
+        orphanRow.appendChild(nameEl);
+        orphanRow.appendChild(countEl);
+        orphanRow.appendChild(arrow);
+        orphanRow.addEventListener('click', () => openGareScenariosPopup({ id: '__orphans__', nom: 'Non classés' }, null));
+        body.appendChild(orphanRow);
+      }
+    }
+
+    document.body.appendChild(popup);
+    scenariosPopup = popup;
+    scenariosPopup._render = renderTable;
+    renderTable();
+  }
+
+  // Popup intermédiaire : sous-catégories d'une gare (Colis suspect, …)
+  function openGareCategoriesPopup(gare) {
+    if (gareCategoriesPopup) closeGareCategoriesPopup();
+    const popup = document.createElement('div');
+    popup.id = 'gare-categories-popup';
+    popup.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:540;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,0.7);width:440px;max-width:92vw;font-family:var(--mono);display:flex;flex-direction:column;max-height:80vh;';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;';
+    const backBtn = document.createElement('button');
+    backBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px;';
+    backBtn.textContent = '◂';
+    backBtn.title = 'Retour';
+    backBtn.addEventListener('click', closeGareCategoriesPopup);
+    const title = document.createElement('div');
+    title.style.cssText = 'flex:1;';
+    const titleSm = document.createElement('div');
+    titleSm.style.cssText = 'font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;';
+    titleSm.textContent = 'Sous-catégories';
+    const titleLg = document.createElement('div');
+    titleLg.style.cssText = 'font-size:14px;color:var(--text);font-weight:600;margin-top:2px;';
+    titleLg.textContent = gare.nom;
+    title.appendChild(titleSm);
+    title.appendChild(titleLg);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => { closeGareCategoriesPopup(); closeScenariosPopup(); });
+    header.appendChild(backBtn);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // Liste
+    const listSection = document.createElement('div');
+    listSection.style.cssText = 'overflow-y:auto;flex:1;';
+    popup.appendChild(listSection);
+
+    function renderList() {
+      listSection.textContent = '';
+      const cats = getSubcategoriesForGare(gare.id);
+      if (cats.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:20px;text-align:center;color:var(--muted);font-size:11px;';
+        empty.textContent = 'Aucune sous-catégorie. Crée-en une ci-dessous.';
+        listSection.appendChild(empty);
+        return;
+      }
+      cats.forEach(name => {
+        const n = countScenariosForGareSubcat(gare.id, name);
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;';
+        row.addEventListener('mouseenter', () => row.style.background = 'var(--surface2)');
+        row.addEventListener('mouseleave', () => row.style.background = '');
+        const nameEl = document.createElement('div');
+        nameEl.style.cssText = 'flex:1;color:var(--text);font-weight:' + (n > 0 ? '600' : '400') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        nameEl.textContent = name;
+        const countEl = document.createElement('div');
+        countEl.style.cssText = 'color:' + (n > 0 ? 'var(--accent2)' : 'var(--muted)') + ';font-size:11px;';
+        countEl.textContent = n > 0 ? (n + ' scénario' + (n > 1 ? 's' : '')) : '—';
+
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = '✎';
+        renameBtn.title = 'Renommer';
+        renameBtn.style.cssText = 'padding:3px 7px;background:none;border:1px solid var(--accent2);border-radius:3px;color:var(--accent2);font-family:inherit;font-size:10px;cursor:pointer;';
+        renameBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nv = prompt('Nouveau nom de la sous-catégorie :', name);
+          if (nv == null) return;
+          const trimmed = nv.trim();
+          if (!trimmed || trimmed === name) return;
+          renameSubcategory(gare.id, name, trimmed);
+          renderList();
+        });
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '✕';
+        delBtn.title = 'Supprimer';
+        delBtn.style.cssText = 'padding:3px 7px;background:none;border:1px solid #ff4040;border-radius:3px;color:#ff4040;font-family:inherit;font-size:10px;cursor:pointer;';
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (deleteSubcategory(gare.id, name)) renderList();
+        });
+
+        const arrow = document.createElement('div');
+        arrow.style.cssText = 'color:var(--muted);font-size:11px;';
+        arrow.textContent = '▸';
+
+        row.appendChild(nameEl);
+        row.appendChild(countEl);
+        row.appendChild(renameBtn);
+        row.appendChild(delBtn);
+        row.appendChild(arrow);
+        row.addEventListener('click', () => openGareScenariosPopup(gare, name));
+        listSection.appendChild(row);
+      });
+    }
+
+    // Footer : ajouter une sous-catégorie
+    const addSection = document.createElement('div');
+    addSection.style.cssText = 'padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface2);';
+    const newInput = document.createElement('input');
+    newInput.type = 'text';
+    newInput.placeholder = 'Nouvelle sous-catégorie…';
+    newInput.style.cssText = 'flex:1;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:11px;outline:none;';
+    const addBtn = document.createElement('button');
+    addBtn.textContent = '+ Ajouter';
+    addBtn.style.cssText = 'padding:6px 12px;background:var(--accent2);color:#000;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;';
+    function doAdd() {
+      if (addSubcategory(gare.id, newInput.value)) { newInput.value = ''; renderList(); }
+    }
+    addBtn.addEventListener('click', doAdd);
+    newInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
+    addSection.appendChild(newInput);
+    addSection.appendChild(addBtn);
+    popup.appendChild(addSection);
+
+    document.body.appendChild(popup);
+    gareCategoriesPopup = popup;
+    gareCategoriesPopup._render = renderList;
+    gareCategoriesPopup._gare = gare;
+    renderList();
+  }
+
+  function closeGareCategoriesPopup() {
+    if (gareCategoriesPopup) { gareCategoriesPopup.remove(); gareCategoriesPopup = null; }
+    if (scenariosPopup && scenariosPopup._render) scenariosPopup._render();
+  }
+
+  // Popup secondaire : scénarios d'une gare donnée + sauvegarde de la scène
+  function openGareScenariosPopup(gare, subcat) {
+    if (gareScenariosPopup) closeGareScenariosPopup();
+    const isOrphans = gare.id === '__orphans__';
+    const popup = document.createElement('div');
+    popup.id = 'gare-scenarios-popup';
+    popup.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:550;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,0.7);width:460px;max-width:92vw;font-family:var(--mono);display:flex;flex-direction:column;max-height:80vh;';
+
+    // Header avec retour
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;';
+    const backBtn = document.createElement('button');
+    backBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px;';
+    backBtn.textContent = '◂';
+    backBtn.title = 'Retour';
+    backBtn.addEventListener('click', closeGareScenariosPopup);
+    const title = document.createElement('div');
+    title.style.cssText = 'flex:1;';
+    const titleSm = document.createElement('div');
+    titleSm.style.cssText = 'font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;';
+    titleSm.textContent = isOrphans ? 'Scénarios' : (subcat || 'Colis suspect');
+    const titleLg = document.createElement('div');
+    titleLg.style.cssText = 'font-size:14px;color:var(--text);font-weight:600;margin-top:2px;';
+    titleLg.textContent = gare.nom;
+    title.appendChild(titleSm);
+    title.appendChild(titleLg);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => { closeGareScenariosPopup(); closeGareCategoriesPopup(); closeScenariosPopup(); });
+    header.appendChild(backBtn);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // Liste des scénarios
+    const listSection = document.createElement('div');
+    listSection.style.cssText = 'overflow-y:auto;flex:1;';
+    popup.appendChild(listSection);
+
+    function renderList() {
+      listSection.textContent = '';
+      const all = getSavedScenarios();
+      const filtered = isOrphans
+        ? all.filter(sc => !sc.gareId)
+        : all.filter(sc => sc.gareId === gare.id && normalizeSubcat(sc) === subcat);
+
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:20px;text-align:center;color:var(--muted);font-size:11px;';
+        empty.textContent = 'Aucun scénario pour ' + gare.nom;
+        listSection.appendChild(empty);
+        return;
+      }
+
+      filtered.forEach(sc => {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px;';
+        const info = document.createElement('div');
+        info.style.cssText = 'flex:1;overflow:hidden;';
+        const nameEl = document.createElement('div');
+        nameEl.style.cssText = 'color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        nameEl.textContent = sc.name;
+        const metaEl = document.createElement('div');
+        metaEl.style.cssText = 'color:var(--muted);font-size:10px;margin-top:2px;';
+        const count = (sc.annotations || []).length;
+        const d = sc.createdAt ? new Date(sc.createdAt).toLocaleDateString('fr-FR') : '';
+        metaEl.textContent = count + ' annotation' + (count > 1 ? 's' : '') + (d ? ' · ' + d : '');
+        info.appendChild(nameEl);
+        info.appendChild(metaEl);
+
+        const loadBtn = document.createElement('button');
+        loadBtn.textContent = 'Charger';
+        loadBtn.style.cssText = 'padding:4px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:inherit;font-size:10px;cursor:pointer;';
+        loadBtn.addEventListener('click', () => loadScenario(sc));
+
+        const editBtn = document.createElement('button');
+        editBtn.textContent = '✎';
+        editBtn.title = 'Éditer';
+        editBtn.style.cssText = 'padding:4px 8px;background:none;border:1px solid var(--accent2);border-radius:3px;color:var(--accent2);font-family:inherit;font-size:10px;cursor:pointer;';
+        editBtn.addEventListener('click', () => enterEditMode(sc));
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '✕';
+        delBtn.title = 'Supprimer';
+        delBtn.style.cssText = 'padding:4px 8px;background:none;border:1px solid #ff4040;border-radius:3px;color:#ff4040;font-family:inherit;font-size:10px;cursor:pointer;';
+        delBtn.addEventListener('click', () => deleteScenario(sc.id));
+
+        row.appendChild(info);
+        row.appendChild(loadBtn);
+        row.appendChild(editBtn);
+        row.appendChild(delBtn);
+        listSection.appendChild(row);
+      });
+    }
+
+    // Footer : enregistrer la scène courante sous cette gare (sauf pour les orphans, lecture seule)
+    let nameInput = null;
+    if (!isOrphans) {
+      const saveSection = document.createElement('div');
+      saveSection.style.cssText = 'padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface2);';
+      nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Nom du scénario à enregistrer…';
+      nameInput.style.cssText = 'flex:1;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:11px;outline:none;';
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Enregistrer';
+      saveBtn.style.cssText = 'padding:6px 12px;background:var(--accent2);color:#000;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;';
+
+      function doSave() {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        const annots = (typeof Annotations !== 'undefined' && Annotations.getAnnotations)
+          ? Annotations.getAnnotations() : [];
+        if (annots.length === 0) {
+          if (!confirm('Aucune annotation sur le schéma. Enregistrer un scénario vide ?')) return;
+        }
+        // Capture la vue courante (zoom + pan) pour la restaurer au chargement
+        let view = null;
+        try {
+          const mv = Viewer.getMainViewer && Viewer.getMainViewer();
+          if (mv) {
+            const c = mv.viewport.getCenter();
+            view = { x: c.x, y: c.y, zoom: mv.viewport.getZoom() };
+          }
+        } catch {}
+        const scenarios = getSavedScenarios();
+        scenarios.push({
+          id: 'sc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+          name: name,
+          createdAt: Date.now(),
+          category: 'colis-suspect',
+          subcategory: subcat || 'Colis suspect',
+          gareId: gare.id,
+          gareName: gare.nom,
+          zoneId: gare.zone_id || null,
+          zoneName: gare.nom,
+          view: view,
+          annotations: JSON.parse(JSON.stringify(annots)),
+        });
+        saveScenariosList(scenarios);
+        nameInput.value = '';
+        renderList();
+      }
+
+      saveBtn.addEventListener('click', doSave);
+      nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
+
+      saveSection.appendChild(nameInput);
+      saveSection.appendChild(saveBtn);
+      popup.appendChild(saveSection);
+    }
+
+    document.body.appendChild(popup);
+    gareScenariosPopup = popup;
+    gareScenariosPopup._render = renderList;
+    renderList();
+    if (nameInput) setTimeout(() => nameInput.focus(), 50);
+  }
+
+  function closeGareScenariosPopup() {
+    if (gareScenariosPopup) { gareScenariosPopup.remove(); gareScenariosPopup = null; }
+    // Re-rafraîchir les compteurs des popups parents
+    if (gareCategoriesPopup && gareCategoriesPopup._render) gareCategoriesPopup._render();
+    if (scenariosPopup && scenariosPopup._render) scenariosPopup._render();
+  }
+
+  function loadScenario(sc) {
+    const annots = sc.annotations || [];
+    const stickers = annots.filter(a => a.type === 'image');
+    if (stickers.length === 0) {
+      // Pas de sticker à paramétrer → chargement direct
+      finalizeScenarioLoad(sc, annots, null);
+      return;
+    }
+    // Ouvrir le configurateur de remplacement
+    openScenarioConfigurator(sc);
+  }
+
+  function openScenarioConfigurator(sc) {
+    closeGareScenariosPopup();
+    closeScenariosPopup();
+    const annots = sc.annotations || [];
+    const library = Store.getJSON('eic_stickers', []) || [];
+    // Un "override" par sticker : { srcOverride, labelOverride }
+    const overrides = new Map();
+
+    const popup = document.createElement('div');
+    popup.id = 'scenario-configurator';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:600;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,0.7);width:520px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;font-family:var(--mono);';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;';
+    const title = document.createElement('div');
+    title.style.cssText = 'flex:1;';
+    const titleLabel = document.createElement('div');
+    titleLabel.style.cssText = 'font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;';
+    titleLabel.textContent = 'Charger le scénario';
+    const titleName = document.createElement('div');
+    titleName.style.cssText = 'font-size:14px;color:var(--text);font-weight:600;margin-top:2px;';
+    titleName.textContent = sc.name;
+    title.appendChild(titleLabel);
+    title.appendChild(titleName);
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeConfigurator);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px 16px;overflow-y:auto;flex:1;';
+    popup.appendChild(body);
+
+    const stickers = annots.filter(a => a.type === 'image');
+    if (stickers.length === 0) {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'color:var(--muted);font-size:11px;padding:8px 0;';
+      msg.textContent = 'Aucun sticker à personnaliser.';
+      body.appendChild(msg);
+    } else {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:var(--muted);font-size:10px;margin-bottom:10px;';
+      hint.textContent = stickers.length + ' sticker' + (stickers.length > 1 ? 's' : '') + ' dans ce scénario — position et taille conservées, choisis l\'image et le libellé.';
+      body.appendChild(hint);
+
+      stickers.forEach(st => {
+        const row = buildStickerRow(st, library, overrides);
+        body.appendChild(row);
+      });
+    }
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;';
+    const modeLabel = document.createElement('label');
+    modeLabel.style.cssText = 'flex:1;color:var(--muted);font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;';
+    const modeChk = document.createElement('input');
+    modeChk.type = 'checkbox';
+    modeChk.checked = true;
+    modeLabel.appendChild(modeChk);
+    modeLabel.appendChild(document.createTextNode(' Remplacer les annotations actuelles'));
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.style.cssText = 'padding:7px 14px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:11px;cursor:pointer;';
+    cancelBtn.addEventListener('click', closeConfigurator);
+    const loadBtn = document.createElement('button');
+    loadBtn.textContent = 'Charger';
+    loadBtn.style.cssText = 'padding:7px 16px;background:var(--accent2);color:#000;border:none;border-radius:4px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;';
+    loadBtn.addEventListener('click', () => {
+      // Appliquer les overrides sur les copies des annotations
+      const modified = annots.map(a => {
+        if (a.type !== 'image') return a;
+        const ov = overrides.get(a.id);
+        if (!ov) return a;
+        return Object.assign({}, a, {
+          src: ov.src != null ? ov.src : a.src,
+          label: ov.label != null ? ov.label : a.label,
+        });
+      });
+      finalizeScenarioLoad(sc, modified, modeChk.checked);
+      closeConfigurator();
+    });
+    footer.appendChild(modeLabel);
+    footer.appendChild(cancelBtn);
+    footer.appendChild(loadBtn);
+    popup.appendChild(footer);
+
+    document.body.appendChild(popup);
+    scenarioConfigurator = popup;
+  }
+
+  function buildStickerRow(annotation, library, overrides) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px;background:var(--surface2);border-radius:5px;margin-bottom:6px;';
+
+    // Preview original
+    const origBox = document.createElement('div');
+    origBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:64px;';
+    const origImg = document.createElement('img');
+    origImg.src = annotation.src;
+    origImg.style.cssText = 'max-height:32px;max-width:56px;object-fit:contain;background:#fff;border-radius:3px;padding:2px;';
+    const origLabel = document.createElement('div');
+    origLabel.style.cssText = 'font-size:9px;color:var(--muted);margin-top:3px;';
+    origLabel.textContent = annotation.label || '(sans nom)';
+    origBox.appendChild(origImg);
+    origBox.appendChild(origLabel);
+    row.appendChild(origBox);
+
+    // Flèche
+    const arrow = document.createElement('span');
+    arrow.style.cssText = 'color:var(--muted);font-size:14px;';
+    arrow.textContent = '→';
+    row.appendChild(arrow);
+
+    // Preview destination (par défaut = original)
+    const destBox = document.createElement('div');
+    destBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:64px;cursor:pointer;';
+    destBox.title = 'Cliquer pour changer le sticker';
+    const destImg = document.createElement('img');
+    destImg.src = annotation.src;
+    destImg.style.cssText = 'max-height:32px;max-width:56px;object-fit:contain;background:#fff;border-radius:3px;padding:2px;border:2px dashed var(--accent2);';
+    const destLabel = document.createElement('div');
+    destLabel.style.cssText = 'font-size:9px;color:var(--accent2);margin-top:3px;';
+    destLabel.textContent = 'cliquer';
+    destBox.appendChild(destImg);
+    destBox.appendChild(destLabel);
+    destBox.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openStickerPickerInline(destBox, library, (chosen) => {
+        const cur = overrides.get(annotation.id) || {};
+        overrides.set(annotation.id, Object.assign(cur, { src: chosen.imageSrc, label: chosen.name }));
+        destImg.src = chosen.imageSrc;
+        destLabel.textContent = chosen.name;
+        destLabel.style.color = 'var(--text)';
+        destImg.style.border = '2px solid var(--accent2)';
+        // Pré-remplir l'input libellé aussi
+        if (labelInput.value === (annotation.label || '')) labelInput.value = chosen.name;
+      });
+    });
+    row.appendChild(destBox);
+
+    // Champ libellé
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.placeholder = 'Libellé (ex: 67432)';
+    labelInput.value = annotation.label || '';
+    labelInput.style.cssText = 'flex:1;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:inherit;font-size:11px;outline:none;';
+    labelInput.addEventListener('input', () => {
+      const cur = overrides.get(annotation.id) || {};
+      overrides.set(annotation.id, Object.assign(cur, { label: labelInput.value }));
+    });
+    row.appendChild(labelInput);
+
+    return row;
+  }
+
+  // Charge la bibliothèque d'images (avec support chunked) et les catégories
+  function loadStickerLibrary() {
+    let library = Store.getJSON('eic_image_library', []);
+    if (library && library.chunks) {
+      let all = [];
+      for (let i = 0; i < library.chunks; i++) {
+        all = all.concat(Store.getJSON('eic_image_library_' + i, []) || []);
+      }
+      library = all;
+    }
+    if (!Array.isArray(library)) library = [];
+    const categories = Store.getJSON('eic_sticker_categories', []) || [];
+    return { library, categories };
+  }
+
+  function openStickerPickerInline(anchor, _legacy, onChoose) {
+    const existing = document.getElementById('sticker-picker-inline');
+    if (existing) existing.remove();
+
+    const { library, categories } = loadStickerLibrary();
+    if (library.length === 0) {
+      alert('Aucun sticker disponible. Va dans Paramètres > Stickers pour en créer.');
+      return;
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'sticker-picker-inline';
+    menu.style.cssText = 'position:fixed;z-index:650;background:var(--surface);border:1px solid var(--accent2);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.7);max-height:440px;overflow-y:auto;width:280px;padding:6px;';
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = Math.min(window.innerWidth - 290, rect.left) + 'px';
+    menu.style.top = Math.min(window.innerHeight - 450, rect.bottom + 4) + 'px';
+
+    // Barre de recherche en haut
+    const searchEl = document.createElement('input');
+    searchEl.type = 'text';
+    searchEl.placeholder = 'Rechercher un sticker…';
+    searchEl.style.cssText = 'width:100%;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;margin-bottom:6px;box-sizing:border-box;';
+    menu.appendChild(searchEl);
+
+    const listEl = document.createElement('div');
+    menu.appendChild(listEl);
+
+    function chooseAndClose(img) {
+      menu.remove();
+      onChoose({ imageSrc: img.dataUrl, name: img.name });
+    }
+
+    function render(query) {
+      listEl.textContent = '';
+      const q = (query || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+
+      if (categories.length === 0) {
+        // Aucune catégorie configurée → liste plate
+        const matches = library.filter(i => !q || (i.name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(q));
+        if (matches.length === 0) { showEmpty(); return; }
+        listEl.appendChild(buildImageGrid(matches));
+        return;
+      }
+
+      // Mode catégorisé — parcours récursif
+      let anyShown = false;
+      categories.forEach(cat => {
+        const section = buildCategorySection(cat, q, chooseAndClose);
+        if (section) { listEl.appendChild(section); anyShown = true; }
+      });
+      if (!anyShown) showEmpty();
+    }
+
+    function showEmpty() {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:10px;text-align:center;color:var(--muted);font-size:10px;';
+      empty.textContent = 'Aucun résultat';
+      listEl.appendChild(empty);
+    }
+
+    // Rend les images d'une catégorie (et filtrage par query)
+    function buildImageGrid(imgs) {
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 2px;';
+      imgs.forEach(img => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#fff;border:1px solid var(--border);border-radius:3px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color 0.1s;';
+        card.title = img.name;
+        card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent2)');
+        card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+        card.addEventListener('click', () => chooseAndClose(img));
+        const imgEl = document.createElement('img');
+        imgEl.src = img.dataUrl;
+        imgEl.style.cssText = 'max-height:32px;max-width:100%;object-fit:contain;pointer-events:none;';
+        card.appendChild(imgEl);
+        const nameEl = document.createElement('span');
+        nameEl.style.cssText = 'font-family:var(--mono);font-size:8px;color:#333;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;pointer-events:none;';
+        nameEl.textContent = img.name;
+        card.appendChild(nameEl);
+        grid.appendChild(card);
+      });
+      return grid;
+    }
+
+    function buildCategorySection(cat, query, onChooseCb) {
+      // Collecte récursive de toutes les images de cette catégorie + descendants
+      function collectImages(c) {
+        let all = [];
+        if (c.images) {
+          c.images.forEach(n => {
+            const img = library.find(i => i.name === n);
+            if (img) all.push(img);
+          });
+        }
+        if (c.children) c.children.forEach(ch => { all = all.concat(collectImages(ch)); });
+        return all;
+      }
+      const all = collectImages(cat);
+      const q = query || '';
+      const matches = q
+        ? all.filter(i => (i.name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(q))
+        : all;
+      if (matches.length === 0) return null;
+
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-bottom:4px;';
+
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--surface2);border-radius:3px;cursor:pointer;user-select:none;';
+      const arrow = document.createElement('span');
+      arrow.style.cssText = 'font-size:9px;color:var(--muted);width:10px;';
+      const isOpen = !!q; // Ouvrir par défaut si recherche active
+      arrow.textContent = isOpen ? '▾' : '▸';
+      const titleEl = document.createElement('span');
+      titleEl.style.cssText = 'flex:1;font-family:var(--mono);font-size:10px;color:var(--text);';
+      titleEl.textContent = cat.nom;
+      const countEl = document.createElement('span');
+      countEl.style.cssText = 'font-size:9px;color:var(--muted);';
+      countEl.textContent = matches.length;
+      header.appendChild(arrow);
+      header.appendChild(titleEl);
+      header.appendChild(countEl);
+      section.appendChild(header);
+
+      const body = document.createElement('div');
+      body.style.display = isOpen ? 'block' : 'none';
+      body.appendChild(buildImageGrid(matches));
+      section.appendChild(body);
+
+      header.addEventListener('click', () => {
+        const open = body.style.display === 'none';
+        body.style.display = open ? 'block' : 'none';
+        arrow.textContent = open ? '▾' : '▸';
+      });
+
+      return section;
+    }
+
+    searchEl.addEventListener('input', () => render(searchEl.value));
+    render('');
+
+    document.body.appendChild(menu);
+    setTimeout(() => searchEl.focus(), 50);
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('mousedown', closeHandler, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 50);
+  }
+
+  let scenarioConfigurator = null;
+  function closeConfigurator() {
+    if (scenarioConfigurator) { scenarioConfigurator.remove(); scenarioConfigurator = null; }
+  }
+
+  function finalizeScenarioLoad(sc, annots, replaceMode) {
+    // replaceMode : true = Annotations.clear() avant ; false = add ; null = toujours remplacer
+    const mode = replaceMode === null ? true : replaceMode;
+    if (mode) Annotations.clear();
+    if (sc.zoneId && typeof Viewer !== 'undefined' && Viewer.showZone) {
+      try { Viewer.showZone(sc.zoneId); } catch {}
+    }
+    // Restaurer la vue exacte (zoom + pan) après switch de zone
+    if (sc.view) {
+      try {
+        const mv = Viewer.getMainViewer && Viewer.getMainViewer();
+        if (mv && typeof OpenSeadragon !== 'undefined') {
+          // Léger délai pour laisser showZone finir son animation
+          setTimeout(() => {
+            mv.viewport.panTo(new OpenSeadragon.Point(sc.view.x, sc.view.y), true);
+            mv.viewport.zoomTo(sc.view.zoom, null, true);
+          }, 50);
+        }
+      } catch {}
+    }
+    if (Annotations.addRaw) {
+      Annotations.addRaw(annots);
+    }
+    closeGareScenariosPopup();
+    closeScenariosPopup();
+  }
+
+  function deleteScenario(id) {
+    if (!confirm('Supprimer ce scénario ?')) return;
+    const scenarios = getSavedScenarios().filter(s => s.id !== id);
+    saveScenariosList(scenarios);
+    // Rafraîchir le popup actuellement ouvert
+    if (gareScenariosPopup && gareScenariosPopup._render) {
+      gareScenariosPopup._render();
+    } else if (scenariosPopup && scenariosPopup._render) {
+      scenariosPopup._render();
+    }
+  }
+
+  // === ÉDITION D'UN SCÉNARIO ===
+  let scenarioEditBar = null;
+
+  function enterEditMode(sc) {
+    // Ferme l'éventuelle barre précédente
+    closeEditBar();
+    // Charge le scénario tel quel (remplace les annotations actuelles), sans configurateur
+    finalizeScenarioLoad(sc, sc.annotations || [], true);
+    // Affiche la barre d'édition flottante
+    openEditBar(sc);
+  }
+
+  function openEditBar(sc) {
+    const bar = document.createElement('div');
+    bar.id = 'scenario-edit-bar';
+    bar.style.cssText = 'position:fixed;top:60px;right:20px;z-index:700;background:var(--surface);border:1px solid var(--accent2);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,0.7);padding:10px 12px;font-family:var(--mono);display:flex;flex-direction:column;gap:8px;min-width:320px;max-width:92vw;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    const labelSm = document.createElement('div');
+    labelSm.style.cssText = 'font-size:10px;color:var(--accent2);letter-spacing:1px;text-transform:uppercase;';
+    labelSm.textContent = 'Édition du scénario';
+    const labelLg = document.createElement('div');
+    labelLg.style.cssText = 'font-size:11px;color:var(--muted);';
+    labelLg.textContent = sc.gareName ? ('Gare : ' + sc.gareName) : '';
+    header.appendChild(labelSm);
+    if (sc.gareName) header.appendChild(labelLg);
+    bar.appendChild(header);
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = sc.name || '';
+    nameInput.placeholder = 'Nom du scénario';
+    nameInput.style.cssText = 'padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:11px;outline:none;';
+    bar.appendChild(nameInput);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:10px;color:var(--muted);line-height:1.4;';
+    hint.textContent = 'Modifie la vue (zoom/pan) et les annotations sur le schéma, puis enregistre.';
+    bar.appendChild(hint);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.style.cssText = 'padding:6px 12px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:11px;cursor:pointer;';
+    cancelBtn.addEventListener('click', closeEditBar);
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Enregistrer les modifications';
+    saveBtn.style.cssText = 'padding:6px 12px;background:var(--accent2);color:#000;border:none;border-radius:4px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;';
+    saveBtn.addEventListener('click', () => saveScenarioEdits(sc.id, nameInput.value));
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(saveBtn);
+    bar.appendChild(btnRow);
+
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveScenarioEdits(sc.id, nameInput.value); }
+      if (e.key === 'Escape') { e.preventDefault(); closeEditBar(); }
+    });
+
+    document.body.appendChild(bar);
+    scenarioEditBar = bar;
+    setTimeout(() => nameInput.focus(), 50);
+  }
+
+  function closeEditBar() {
+    if (scenarioEditBar) { scenarioEditBar.remove(); scenarioEditBar = null; }
+  }
+
+  function saveScenarioEdits(id, newName) {
+    const name = (newName || '').trim();
+    if (!name) { alert('Le nom ne peut pas être vide.'); return; }
+    const scenarios = getSavedScenarios();
+    const idx = scenarios.findIndex(s => s.id === id);
+    if (idx === -1) { alert('Scénario introuvable.'); closeEditBar(); return; }
+
+    // Capture vue et annotations actuelles
+    const annots = (typeof Annotations !== 'undefined' && Annotations.getAnnotations)
+      ? Annotations.getAnnotations() : [];
+    let view = scenarios[idx].view || null;
+    try {
+      const mv = Viewer.getMainViewer && Viewer.getMainViewer();
+      if (mv) {
+        const c = mv.viewport.getCenter();
+        view = { x: c.x, y: c.y, zoom: mv.viewport.getZoom() };
+      }
+    } catch {}
+
+    scenarios[idx] = Object.assign({}, scenarios[idx], {
+      name: name,
+      view: view,
+      annotations: JSON.parse(JSON.stringify(annots)),
+      updatedAt: Date.now(),
+    });
+    saveScenariosList(scenarios);
+    closeEditBar();
+  }
+
+  function closeScenariosPopup() {
+    if (scenariosPopup) { scenariosPopup.remove(); scenariosPopup = null; }
   }
 
   function setupSidebarToggle() {
@@ -1182,7 +2191,11 @@ const Search = (() => {
       const item = document.createElement('div');
       item.className = 'add-menu-item';
       if (a.danger) item.style.color = 'var(--danger)';
-      item.innerHTML = `<span style="display:inline-block;width:16px;text-align:center;margin-right:4px;">${a.icon}</span>${a.label}`;
+      const iconSpan = document.createElement('span');
+      iconSpan.style.cssText = 'display:inline-block;width:16px;text-align:center;margin-right:4px;';
+      iconSpan.textContent = a.icon;
+      item.appendChild(iconSpan);
+      item.appendChild(document.createTextNode(a.label));
       item.addEventListener('click', () => { menu.remove(); a.action(); });
       menu.appendChild(item);
     });
@@ -1339,15 +2352,23 @@ const Search = (() => {
         item.style.alignItems = 'center';
         item.style.gap = '6px';
 
+        const iconSpan = document.createElement('span');
+        iconSpan.style.cssText = 'width:14px;text-align:center;';
+        const labelSpan = document.createElement('span');
         if (isCurrentLine) {
           item.style.color = 'var(--accent2)';
-          item.innerHTML = `<span style="width:14px;text-align:center;">●</span>${l.nom} (actuelle)`;
+          iconSpan.textContent = '●';
+          labelSpan.textContent = l.nom + ' (actuelle)';
         } else if (alreadyIn) {
           item.style.opacity = '0.5';
-          item.innerHTML = `<span style="width:14px;text-align:center;">✓</span>${l.nom}`;
+          iconSpan.textContent = '✓';
+          labelSpan.textContent = l.nom;
         } else {
-          item.innerHTML = `<span style="width:14px;text-align:center;">○</span>${l.nom}`;
+          iconSpan.textContent = '○';
+          labelSpan.textContent = l.nom;
         }
+        item.appendChild(iconSpan);
+        item.appendChild(labelSpan);
 
         item.addEventListener('click', () => {
           if (isCurrentLine) return;
@@ -1748,12 +2769,14 @@ const Search = (() => {
       const gare = Data.getGareForElement(el);
       const item = document.createElement('div');
       item.className = 'disambiguation-item';
-      item.innerHTML = `
-        <div class="item-id">${el.identifiant}</div>
-        <div class="item-context">
-          ${gare ? gare.nom : '?'} · ${el.ligne || '?'} · Km ${el.pk || '?'} · ${el.secteur || '?'}
-        </div>
-      `;
+      const idDiv = document.createElement('div');
+      idDiv.className = 'item-id';
+      idDiv.textContent = el.identifiant;
+      const ctxDiv = document.createElement('div');
+      ctxDiv.className = 'item-context';
+      ctxDiv.textContent = `${gare ? gare.nom : '?'} · ${el.ligne || '?'} · Km ${el.pk || '?'} · ${el.secteur || '?'}`;
+      item.appendChild(idDiv);
+      item.appendChild(ctxDiv);
       item.addEventListener('click', () => {
         closeDisambiguation();
         selectElement(el, parsed);
@@ -1772,10 +2795,14 @@ const Search = (() => {
     gares.forEach(g => {
       const item = document.createElement('div');
       item.className = 'disambiguation-item';
-      item.innerHTML = `
-        <div class="item-id">${g.nom}</div>
-        <div class="item-context">Zone : ${g.zone_id}</div>
-      `;
+      const idDiv = document.createElement('div');
+      idDiv.className = 'item-id';
+      idDiv.textContent = g.nom;
+      const ctxDiv = document.createElement('div');
+      ctxDiv.className = 'item-context';
+      ctxDiv.textContent = `Zone : ${g.zone_id}`;
+      item.appendChild(idDiv);
+      item.appendChild(ctxDiv);
       item.addEventListener('click', () => {
         closeDisambiguation();
         Viewer.panTo(g.x_pct, g.y_pct, 5);

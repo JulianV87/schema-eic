@@ -11,31 +11,8 @@ const Parser = (() => {
     'c': 'signal',
   };
 
-  // Mots-clés → template
-  const TEMPLATE_KEYWORDS = {
-    'absence': 'aiguille_defaillante',
-    'derangement': 'element_derangement',
-    'immobilise': 'train_immobilise',
-    'immobilisé': 'train_immobilise',
-    'retenu': 'train_retenu_quai',
-    'arrete': 'train_arrete_pleine_voie',
-    'arrêté': 'train_arrete_pleine_voie',
-    'coupee': 'voie_coupee',
-    'coupée': 'voie_coupee',
-    'bloquee': 'voie_coupee',
-    'bloquée': 'voie_coupee',
-    'ralentissement': 'ralentissement',
-    'limitation': 'ralentissement',
-    'ltv': 'ralentissement',
-    'catenaire': 'incident_catenaire',
-    'caténaire': 'incident_catenaire',
-    'accident': 'accident_personne',
-    'personne': 'accident_personne',
-    'heurte': 'accident_personne',
-    'occupee': 'voie_occupee',
-    'occupée': 'voie_occupee',
-    'canton': 'voie_occupee',
-  };
+  // Mots-clés → template (vide — à remplir quand l'utilisateur fournira sa liste)
+  const TEMPLATE_KEYWORDS = {};
 
   // Patterns regex pour les éléments infra
   const PATTERNS = {
@@ -48,10 +25,57 @@ const Parser = (() => {
   // Liste des gares (chargée depuis Data au démarrage)
   let gares = [];
 
+  // Normalise : minuscules + strip accents + nettoyage basique
+  function norm(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  // Distance de Levenshtein (itérative, complexité O(n*m))
+  function levenshtein(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const prev = new Array(a.length + 1);
+    const curr = new Array(a.length + 1);
+    for (let j = 0; j <= a.length; j++) prev[j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      curr[0] = i;
+      for (let j = 1; j <= a.length; j++) {
+        const cost = b.charCodeAt(i - 1) === a.charCodeAt(j - 1) ? 0 : 1;
+        curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      }
+      for (let j = 0; j <= a.length; j++) prev[j] = curr[j];
+    }
+    return prev[a.length];
+  }
+
+  // Cherche la gare la plus proche d'un token (distance ≤ 2 pour mots ≥ 4 chars)
+  function fuzzyFindGare(token) {
+    const n = norm(token);
+    if (n.length < 3) return null;
+    const maxDist = n.length >= 5 ? 2 : 1;
+    let best = null, bestDist = Infinity;
+    for (const g of gares) {
+      const candidates = [g.nom_norm, g.nom_court_norm].filter(Boolean);
+      for (const cand of candidates) {
+        // Si le token apparaît en sous-chaîne → distance 0
+        if (cand.includes(n)) {
+          if (0 < bestDist) { best = g; bestDist = 0; }
+          continue;
+        }
+        const d = levenshtein(n, cand);
+        if (d <= maxDist && d < bestDist) { best = g; bestDist = d; }
+      }
+    }
+    return best;
+  }
+
   function init(garesData) {
     gares = garesData.map(g => ({
       nom: g.nom.toLowerCase(),
       nom_court: (g.nom_court || '').toLowerCase(),
+      nom_norm: norm(g.nom),
+      nom_court_norm: norm(g.nom_court || ''),
       data: g
     }));
     // Tri par longueur décroissante pour matcher les noms longs d'abord
@@ -102,29 +126,44 @@ const Parser = (() => {
       remaining = remaining.replace(trainBare[0], ' ');
     }
 
-    // 3. Extraire la gare (contexte) — word boundary pour éviter faux positifs
+    // 3. Extraire la gare (contexte) — recherche exacte + normalisée, puis fuzzy en fallback
+    const remainingNorm = norm(remaining);
+    let matchedNorm = null;
     for (const gare of gares) {
-      const escapedNom = gare.nom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const nomRegex = new RegExp('\\b' + escapedNom + '\\b');
-      if (nomRegex.test(remaining)) {
+      // Essai normalisé (gère les accents manquants : "crepy" ↔ "crépy")
+      const nomN = gare.nom_norm;
+      if (nomN && new RegExp('\\b' + nomN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(remainingNorm)) {
         result.contexte = gare.data;
-        remaining = remaining.replace(nomRegex, ' ');
+        matchedNorm = nomN;
         break;
       }
-      if (gare.nom_court) {
-        const escapedCourt = gare.nom_court.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const courtRegex = new RegExp('\\b' + escapedCourt + '\\b');
-        if (courtRegex.test(remaining)) {
-          result.contexte = gare.data;
-          remaining = remaining.replace(courtRegex, ' ');
+      const courtN = gare.nom_court_norm;
+      if (courtN && new RegExp('\\b' + courtN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(remainingNorm)) {
+        result.contexte = gare.data;
+        matchedNorm = courtN;
+        break;
+      }
+    }
+    if (matchedNorm) {
+      // Retirer grossièrement la gare du "remaining" — par mot, tolérant aux accents
+      remaining = remaining.split(/\s+/).filter(w => norm(w) !== matchedNorm && !matchedNorm.includes(norm(w))).join(' ');
+    } else {
+      // Fallback fuzzy : tester chaque mot restant contre les gares (distance ≤ 2)
+      const words = remaining.split(/\s+/).filter(w => w.length >= 3);
+      for (const w of words) {
+        const g = fuzzyFindGare(w);
+        if (g) {
+          result.contexte = g.data;
+          remaining = remaining.replace(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b'), ' ');
           break;
         }
       }
     }
 
-    // 4. Détecter le template (word boundary)
+    // 4. Détecter le template — comparaison normalisée (tolère accents manquants)
+    const remainingForKeyword = norm(remaining);
     for (const [keyword, template] of Object.entries(TEMPLATE_KEYWORDS)) {
-      if (remaining.includes(keyword)) {
+      if (remainingForKeyword.includes(norm(keyword))) {
         result.template = template;
         break;
       }

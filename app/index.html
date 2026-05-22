@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- TEMPORAIRE — TEST LOCAL DE LA CSP — A RETIRER AVANT COMMIT
+     En prod, c'est le header Content-Security-Policy de vercel.json qui s'applique
+     (et qui inclut en plus frame-ancestors 'none', non supporte en meta). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://fbcwsgqrwolxnqpasbgl.supabase.co; font-src 'self' data:; connect-src 'self' https://fbcwsgqrwolxnqpasbgl.supabase.co https://api.github.com; form-action 'self'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests">
 <title>EIC Paris Nord — Schéma de Situation</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -39,7 +43,9 @@
       <span id="chrono" class="hidden"></span>
     </div>
     <div class="header-right">
+      <button id="btn-scenarios" title="Scénarios enregistrés">Scénarios</button>
       <button id="btn-legend" title="Afficher/masquer la légende">Légende</button>
+      <button id="btn-export-clipboard" title="Copier dans le presse-papier (Durandal)">Copier</button>
       <button id="btn-export-png" title="Télécharger PNG">Export</button>
       <button id="btn-clear" title="Effacer toutes les annotations">Effacer</button>
       <button id="btn-calibrate" title="Mode calibration — pointer les éléments sur le schéma">Calibrer</button>
@@ -60,12 +66,7 @@
       <div id="sidebar-elements-header" class="hidden">
         <span id="sidebar-zone" class="sidebar-zone"></span>
       </div>
-      <div id="sidebar-content">
-        <div class="sidebar-section" data-type="pn">
-          <div class="sidebar-section-title">PN <span style="font-size:9px;color:var(--warn);font-weight:400;margin-left:4px;">(en cours)</span></div>
-          <div class="sidebar-section-list" id="list-pn"></div>
-        </div>
-      </div>
+      <div id="sidebar-content"></div>
 
       <!-- Outils d'annotation -->
       <div id="sidebar-tools">
@@ -419,94 +420,16 @@
   </div>
 </div>
 
-<!-- LIBS CDN -->
-<script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.1/build/openseadragon/openseadragon.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+<!-- LIBS CDN (SRI : ZEN BPSW-003) -->
+<script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.1/build/openseadragon/openseadragon.min.js"
+        integrity="sha384-SslUh5K0qRJYyxhoVK+XxSxjS0BNDdgc3cLvY4+nMEmnLtgdEK3UaBTDaHOk8T9S"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"
+        integrity="sha384-N3H1mDackcFNb3oKRPjCVhDV6IToMfPPDTKJF9ufjBSs/wNeQVMFsbPH5btvcSNH"
+        crossorigin="anonymous"></script>
 
-<!-- AUTH -->
-<script>
-(function() {
-  const SESSION_KEY = 'eic_session';
-  const HASH_KEY = 'eic_access_hash';
-
-  // Vérifier si déjà connecté (session valide 24h)
-  const session = localStorage.getItem(SESSION_KEY);
-  if (session) {
-    try {
-      const s = JSON.parse(session);
-      if (s.expires > Date.now()) {
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('app').style.display = '';
-      }
-    } catch {}
-  }
-
-  // Hash simple du code (pas crypto-grade, juste anti-lecture directe)
-  function hashCode(str) {
-    let h = 0;
-    for (let i = 0; i < str.length; i++) {
-      h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-    }
-    return 'h' + Math.abs(h).toString(36);
-  }
-
-  document.getElementById('login-btn').addEventListener('click', tryLogin);
-  document.getElementById('login-pass').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') tryLogin();
-  });
-  document.getElementById('login-user').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('login-pass').focus();
-  });
-
-  async function tryLogin() {
-    const user = document.getElementById('login-user').value.trim().toLowerCase();
-    const pass = document.getElementById('login-pass').value.trim();
-    if (!user || !pass) return;
-
-    const codeHash = hashCode(user + ':' + pass);
-
-    // Charger le hash attendu depuis Supabase
-    try {
-      const resp = await fetch('https://fbcwsgqrwolxnqpasbgl.supabase.co/rest/v1/config?key=eq.' + HASH_KEY + '&select=value', {
-        headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZiY3dzZ3Fyd29seG5xcGFzYmdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NDM5NDgsImV4cCI6MjA4OTUxOTk0OH0.yxadPWsLZwYbpet9wlYfTxW9Halx-XMV56PvorCKwIU',
-        },
-      });
-      const rows = await resp.json();
-      const expected = rows.length > 0 ? rows[0].value : null;
-
-      if (expected && expected.hash === codeHash) {
-        // Succès — créer une session de 24h
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ expires: Date.now() + 24 * 60 * 60 * 1000 }));
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('app').style.display = '';
-      } else {
-        document.getElementById('login-error').style.display = 'block';
-        document.getElementById('login-pass').value = '';
-        document.getElementById('login-pass').focus();
-      }
-    } catch (e) {
-      // Si Supabase est injoignable, laisser passer (mode dégradé)
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ expires: Date.now() + 24 * 60 * 60 * 1000 }));
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = '';
-    }
-  }
-
-  // Bouton déconnexion
-  document.addEventListener('DOMContentLoaded', () => {
-    const logoutBtn = document.getElementById('btn-logout');
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
-        if (confirm('Se deconnecter ?')) {
-          localStorage.removeItem(SESSION_KEY);
-          location.reload();
-        }
-      });
-    }
-  });
-})();
-</script>
+<!-- AUTH (externalise pour CSP stricte) -->
+<script src="js/auth.js"></script>
 
 <!-- APP -->
 <script src="js/sync.js"></script>

@@ -1,4 +1,9 @@
 node_modules
 scripts
+reference
+.github
+tasks
+docs
+admin
 *.pdf
 .claude

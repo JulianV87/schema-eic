@@ -4,6 +4,12 @@ node_modules/
 # Vercel
 .vercel
 
+# Secrets & env
+.env
+.env.local
+.env.*.local
+app/config.env
+
 # OS
 Thumbs.db
 .DS_Store
@@ -12,6 +18,23 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.swo
 
 # Claude
 .claude/
+
+# Archives internes
+tasks/todo-*-archived.md
+
+# Documents internes SNCF (Guides ZEN cybersecurite, etc.)
+# Mention "INTERNE SNCF - ne doit pas etre communique en dehors de l'entreprise"
+sncf/
+*.pdf
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build
+dist/
+build/

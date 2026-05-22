@@ -136,6 +136,14 @@ const Annotations = (() => {
           if (idx >= 0) annotations.splice(idx, 1);
           exitStickerEditMode();
         }
+        return;
+      }
+      // Échap désactive l'outil courant et réinitialise les états intermédiaires
+      if (e.key === 'Escape' && activeTool) {
+        e.preventDefault();
+        pendingFirstPoint = null;
+        hideStatusMessage();
+        setActiveTool(null);
       }
     });
 
@@ -190,8 +198,14 @@ const Annotations = (() => {
       const hitAnnot = hitTestImageAnnotation(viewportPoint.x, viewportPoint.y)
                     || hitTestAllAnnotations(viewportPoint.x, viewportPoint.y);
 
+      // Un outil de placement est actif → priorité au placement, on ignore les hits sur annotations existantes
+      // (permet de placer un nouveau marqueur près/sur un existant)
+      if (activeTool) {
+        if (editingSticker) exitStickerEditMode();
+        // Laisser la logique de placement prendre le relais plus bas
+      }
       // En mode édition : clic sur le même → rien, clic sur un autre → basculer, clic ailleurs → quitter
-      if (editingSticker) {
+      else if (editingSticker) {
         if (hitAnnot && hitAnnot.id === editingSticker.id) {
           return;
         }
@@ -204,8 +218,8 @@ const Annotations = (() => {
         return;
       }
 
-      // Pas en mode édition : clic sur une annotation → la sélectionner
-      if (hitAnnot) {
+      // Pas d'outil actif et pas en mode édition : clic sur une annotation → la sélectionner
+      else if (hitAnnot) {
         event.preventDefaultAction = true;
         enterStickerEditMode(hitAnnot);
         redraw();
@@ -238,10 +252,9 @@ const Annotations = (() => {
           setActiveTool(null);
         }
       }
-      // Marqueurs ponctuels (obstacle, danger)
+      // Marqueurs ponctuels (obstacle, danger) — outil reste actif pour enchaîner les poses
       else if (MARKER_SYMBOLS[activeTool]) {
         addMarkerAnnotation(activeTool, viewportPoint.x, viewportPoint.y, activeTool);
-        setActiveTool(null);
       }
       // Image depuis la bibliothèque (placement d'un nouveau sticker — un seul puis retour curseur)
       else if (activeTool === 'image-library' && pendingImageSrc && !editingSticker) {
@@ -844,10 +857,45 @@ const Annotations = (() => {
     bar.id = 'sticker-edit-bar';
     bar.style.cssText = 'position:fixed;top:50%;right:12px;transform:translateY(-50%);z-index:300;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 8px;display:flex;flex-direction:column;gap:8px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:var(--mono);font-size:10px;';
 
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = 'position:absolute;top:4px;right:4px;width:20px;height:20px;padding:0;background:none;border:none;color:var(--muted);font-size:14px;line-height:1;cursor:pointer;border-radius:3px;';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Fermer (Échap)';
+    closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = 'var(--surface2)'; closeBtn.style.color = 'var(--text)'; });
+    closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'none'; closeBtn.style.color = 'var(--muted)'; });
+    closeBtn.addEventListener('click', () => exitStickerEditMode());
+    bar.appendChild(closeBtn);
+
     const info = document.createElement('span');
-    info.style.cssText = 'color:var(--accent2);font-weight:600;';
+    info.style.cssText = 'color:var(--accent2);font-weight:600;margin-top:4px;';
     info.textContent = annotation.label || annotation.trainNumber || annotation.text || 'Annotation';
     bar.appendChild(info);
+
+    // Champ texte pour modifier le libellé (marqueurs, lignes, images — pas trains/text qui ont leur propre champ)
+    if (annotation.type === 'marker' || annotation.type === 'line' || annotation.type === 'image') {
+      const labelLabel = document.createElement('span');
+      labelLabel.style.cssText = 'color:var(--muted);';
+      labelLabel.textContent = 'Texte';
+      bar.appendChild(labelLabel);
+
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = annotation.label || '';
+      labelInput.placeholder = 'Libellé…';
+      labelInput.style.cssText = 'width:140px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:10px;outline:none;';
+      labelInput.addEventListener('input', () => {
+        annotation.label = labelInput.value;
+        info.textContent = annotation.label || annotation.trainNumber || annotation.text || 'Annotation';
+        redraw();
+      });
+      labelInput.addEventListener('change', () => { pushUndo(); saveToLocalStorage(); });
+      labelInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); labelInput.blur(); exitStickerEditMode(); }
+        if (e.key === 'Escape') { e.preventDefault(); labelInput.blur(); exitStickerEditMode(); }
+        e.stopPropagation();
+      });
+      bar.appendChild(labelInput);
+    }
 
     // Taille +/-
     const sizeLabel = document.createElement('span');
@@ -1193,7 +1241,14 @@ const Annotations = (() => {
           txt.textContent = label;
           labelSpan.appendChild(txt);
         } else {
-          labelSpan.innerHTML = `<span style="color:${a.color || '#c8daf5'}; font-size:13px; flex-shrink:0;">${icon}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+          const iconSpan = document.createElement('span');
+          iconSpan.style.cssText = `color:${a.color || '#c8daf5'}; font-size:13px; flex-shrink:0;`;
+          iconSpan.textContent = icon;
+          labelSpan.appendChild(iconSpan);
+          const txtSpan = document.createElement('span');
+          txtSpan.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+          txtSpan.textContent = label;
+          labelSpan.appendChild(txtSpan);
         }
 
         const actions = document.createElement('span');
@@ -1245,7 +1300,11 @@ const Annotations = (() => {
   function createMenuItem(icon, label, color, action) {
     const item = document.createElement('div');
     item.style.cssText = `padding:7px 12px; cursor:pointer; color:${color || '#c8daf5'}; display:flex; align-items:center; gap:8px; transition:background 0.1s;`;
-    item.innerHTML = `<span style="width:14px; text-align:center; font-size:13px;">${icon}</span> ${label}`;
+    const iconSpan = document.createElement('span');
+    iconSpan.style.cssText = 'width:14px; text-align:center; font-size:13px;';
+    iconSpan.textContent = icon;
+    item.appendChild(iconSpan);
+    item.appendChild(document.createTextNode(' ' + label));
     item.addEventListener('mouseenter', () => { item.style.background = '#111a2e'; });
     item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
     item.addEventListener('click', (e) => { e.stopPropagation(); action(); });
@@ -1379,7 +1438,15 @@ const Annotations = (() => {
         txt.textContent = label;
         labelSpan.appendChild(txt);
       } else {
-        labelSpan.innerHTML = `<span style="color:${color}; font-size:14px;">${getAnnotationIcon(a)}</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+        const iconSpan = document.createElement('span');
+        iconSpan.style.cssText = `color:${color}; font-size:14px;`;
+        iconSpan.textContent = getAnnotationIcon(a);
+        labelSpan.appendChild(iconSpan);
+        labelSpan.appendChild(document.createTextNode(' '));
+        const txtSpan = document.createElement('span');
+        txtSpan.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        txtSpan.textContent = label;
+        labelSpan.appendChild(txtSpan);
       }
 
       const actions = document.createElement('span');
@@ -1586,6 +1653,22 @@ const Annotations = (() => {
     annotations = [];
     document.querySelectorAll('.sidebar-item.annotated').forEach(el => el.classList.remove('annotated'));
     closeContextMenu();
+    redraw();
+    saveToLocalStorage();
+  }
+
+  /**
+   * Injecter un lot d'annotations (ex: chargement de scénario)
+   * Les IDs sont régénérés pour éviter les collisions avec les annotations existantes.
+   */
+  function addRaw(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) return;
+    pushUndo();
+    arr.forEach(src => {
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = nextId++;
+      annotations.push(copy);
+    });
     redraw();
     saveToLocalStorage();
   }
@@ -2565,10 +2648,11 @@ const Annotations = (() => {
         // Icône
         const icon = document.createElement('span');
         icon.style.cssText = 'font-size:16px;width:24px;text-align:center;flex-shrink:0;';
-        if (custom.imageDataUrl) {
-          icon.innerHTML = '<img src="' + custom.imageDataUrl + '" style="max-height:20px;max-width:28px;">';
-        } else if (custom.imageSrc) {
-          icon.innerHTML = '<img src="' + custom.imageSrc + '" style="max-height:20px;max-width:28px;">';
+        if (custom.imageDataUrl || custom.imageSrc) {
+          const imgEl = document.createElement('img');
+          imgEl.src = custom.imageDataUrl || custom.imageSrc;
+          imgEl.style.cssText = 'max-height:20px;max-width:28px;';
+          icon.appendChild(imgEl);
         } else {
           icon.textContent = custom.symbol;
           icon.style.color = custom.color;
@@ -3345,6 +3429,7 @@ const Annotations = (() => {
     addTextAnnotation,
     remove,
     clear,
+    addRaw,
     redraw,
     getAnnotations,
     undo,
