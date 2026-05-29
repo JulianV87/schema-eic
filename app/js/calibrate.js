@@ -35,39 +35,9 @@ const Calibrate = (() => {
   const DEFAULT_RADIUS = 0.003; // rayon par défaut pour les éléments sans shape
 
   function init() {
-    const btn = document.getElementById('btn-calibrate');
-    if (!btn) return;
-
-    btn.addEventListener('click', () => {
-      active = !active;
-      btn.classList.toggle('active', active);
-
-      if (active) {
-        // Désactiver tout outil d'annotation actif
-        if (Annotations.setActiveTool) Annotations.setActiveTool(null);
-        if (typeof MagicWand !== 'undefined' && MagicWand.setActive) MagicWand.setActive(false);
-        document.getElementById('osd-viewer').style.cursor = 'crosshair';
-        showShapePicker();
-        showStatusMsg('Mode calibration — sélectionnez un mode puis dessinez sur le schéma');
-        enableCalibrationClick();
-      } else {
-        document.getElementById('osd-viewer').style.cursor = '';
-        hideStatusMsg();
-        hideShapePicker();
-        cancelShapeDrawing();
-        disableCalibrationClick();
-        // Nettoyer le debug overlay
-        if (debugOverlay) {
-          debugOverlay = false;
-          destroyDebugCanvas();
-          const viewer = Viewer.getMainViewer();
-          if (viewer) {
-            viewer.removeHandler('animation', redrawDebugOverlay);
-            viewer.removeHandler('resize', resizeDebugCanvas);
-          }
-        }
-      }
-    });
+    // Le mode "Calibrer" manuel a été retiré. init() ne câble plus que le
+    // popup d'édition d'élément + ses prefills, partagés avec la Baguette
+    // magique (magicwand.js) qui réutilise #calibrate-popup et calibrate-confirm.
 
     // Popup events
     document.getElementById('calibrate-close').addEventListener('click', closePopup);

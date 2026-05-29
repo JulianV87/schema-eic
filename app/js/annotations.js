@@ -94,8 +94,6 @@ const Annotations = (() => {
   // Couleurs des lignes de voie
   const VOIE_COLORS = {
     'voie-coupee':     '#ff4040',
-    'ralentissement':  '#ff9520',
-    'voie-libre':      '#00d4a0',
     'catenaire':       '#3080ff',
   };
 
@@ -106,7 +104,7 @@ const Annotations = (() => {
   };
 
   // Outils qui nécessitent 2 clics (point A → point B)
-  const TWO_POINT_TOOLS = ['voie-coupee', 'ralentissement', 'voie-libre', 'catenaire'];
+  const TWO_POINT_TOOLS = ['voie-coupee', 'catenaire'];
 
   // État pour les outils à 2 clics
   let pendingFirstPoint = null;
@@ -238,7 +236,7 @@ const Annotations = (() => {
         });
         setActiveTool(null);
       }
-      // Outils ligne à 2 points (voie coupée, ralentissement, libérée, caténaire)
+      // Outils ligne à 2 points (voie coupée, caténaire)
       else if (TWO_POINT_TOOLS.includes(activeTool)) {
         if (!pendingFirstPoint) {
           // Premier clic → stocker le point A
@@ -1078,13 +1076,11 @@ const Annotations = (() => {
   }
 
   /**
-   * Ajouter une ligne entre deux points (voie coupée, ralentissement, caténaire...)
+   * Ajouter une ligne entre deux points (voie coupée, caténaire...)
    */
   function addLineAnnotation(tool, x1, y1, x2, y2) {
     const labels = {
       'voie-coupee': 'Voie coupée',
-      'ralentissement': 'Ralentissement',
-      'voie-libre': 'Voie libérée',
       'catenaire': 'Absence de tension',
     };
     const num = getNextNumber(tool);
@@ -1184,8 +1180,6 @@ const Annotations = (() => {
       { label: 'Obstacle', icon: '▲', color: '#ff9520', tool: 'obstacle' },
       { label: 'Danger', icon: '⚠', color: '#ff4040', tool: 'danger' },
       { label: 'Voie coupée (2 pts)', icon: '━', color: '#ff4040', tool: 'voie-coupee' },
-      { label: 'Ralentissement (2 pts)', icon: '━', color: '#ff9520', tool: 'ralentissement' },
-      { label: 'Voie libérée (2 pts)', icon: '━', color: '#00d4a0', tool: 'voie-libre' },
       { label: 'Caténaire (2 pts)', icon: '━', color: '#3080ff', tool: 'catenaire' },
       { label: 'Texte libre', icon: 'T', color: '#c8daf5', tool: 'text' },
       { label: 'Sticker...', icon: '🖼', color: '#c8daf5', tool: 'open-stickers' },
