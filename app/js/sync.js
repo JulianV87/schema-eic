@@ -12,6 +12,13 @@ const Store = (() => {
 
   let online = false;
   let cache = {}; // cache mémoire — rempli au init depuis Supabase
+  const loadedHeavy = new Set(); // clés lourdes déjà chargées à la demande
+
+  // Clés volumineuses (images base64) exclues du chargement initial.
+  // Elles sont chargées à la demande via ensureKey() quand l'UI en a besoin,
+  // pour éviter de télécharger ~25 Mo à chaque ouverture de page (egress).
+  const HEAVY_FILTER =
+    '&key=not.like.eic_image_library*&key=not.eq.eic_stickers';
 
   function headers() {
     return {
@@ -27,7 +34,7 @@ const Store = (() => {
    */
   async function init() {
     try {
-      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*', {
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*' + HEAVY_FILTER, {
         headers: headers(),
       });
 
@@ -103,18 +110,46 @@ const Store = (() => {
   }
 
   /**
+   * Charger une clé lourde à la demande (images base64) — une seule fois.
+   * Les lectures get()/getJSON() qui suivent la trouveront dans le cache.
+   */
+  async function ensureKey(key) {
+    if (loadedHeavy.has(key) || (key in cache)) return;
+    loadedHeavy.add(key);
+    if (!online) return;
+    try {
+      const resp = await fetch(
+        SUPABASE_URL + '/rest/v1/config?select=value&key=eq.' + encodeURIComponent(key),
+        { headers: headers() }
+      );
+      if (resp.ok) {
+        const rows = await resp.json();
+        if (rows && rows.length > 0) {
+          cache[key] = JSON.stringify(rows[0].value);
+        }
+      } else {
+        loadedHeavy.delete(key); // permettre une nouvelle tentative
+      }
+    } catch (e) {
+      loadedHeavy.delete(key);
+      console.warn('Store: ensureKey échoué pour', key, e.message);
+    }
+  }
+
+  /**
    * Forcer un rafraîchissement complet depuis Supabase
    */
   async function forceRefresh() {
     showStatus('syncing');
     try {
-      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*', {
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/config?select=*' + HEAVY_FILTER, {
         headers: headers(),
       });
       if (resp.ok) {
         online = true;
         const rows = await resp.json();
         cache = {};
+        loadedHeavy.clear();
         rows.forEach(row => {
           cache[row.key] = JSON.stringify(row.value);
         });
@@ -194,7 +229,7 @@ const Store = (() => {
   // Compatibilité avec l'ancien Sync.save()
   function save(key, value) { return set(key, value); }
 
-  return { init, get, set, getJSON, save, forceRefresh, isOnline, pushAllToCloud };
+  return { init, get, set, getJSON, save, forceRefresh, isOnline, pushAllToCloud, ensureKey };
 })();
 
 // Alias pour compatibilité

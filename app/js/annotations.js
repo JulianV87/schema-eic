@@ -2212,6 +2212,20 @@ const Annotations = (() => {
 
   // === MENU CATÉGORIES STICKERS DANS LA SIDEBAR ===
 
+  // Lecture de la bibliothèque d'images (palette). Clé lourde chargée à la
+  // demande via Store.ensureKey('eic_image_library') — voir les flyouts.
+  function getLibrary() {
+    let library = Store.getJSON('eic_image_library', []);
+    if (library && library.chunks) {
+      let all = [];
+      for (let i = 0; i < library.chunks; i++) {
+        all = all.concat(Store.getJSON('eic_image_library_' + i, []) || []);
+      }
+      library = all;
+    }
+    return Array.isArray(library) ? library : [];
+  }
+
   function renderPinnedAnnotations() {
     renderStickerCategoriesMenu();
   }
@@ -2242,17 +2256,9 @@ const Annotations = (() => {
     container.appendChild(catWrapper);
 
     const categories = Store.getJSON('eic_sticker_categories', []);
-    let library = Store.getJSON('eic_image_library', []);
-    // Support chunked library
-    if (library && library.chunks) {
-      let all = [];
-      for (let i = 0; i < library.chunks; i++) {
-        const chunk = Store.getJSON('eic_image_library_' + i, []);
-        all = all.concat(chunk);
-      }
-      library = all;
-    }
-    if (!Array.isArray(library)) library = [];
+    // La palette (eic_image_library) n'est PAS lue ici : le menu n'affiche que
+    // les noms de catégories. Les vignettes (dataUrl) sont chargées à la demande
+    // à l'ouverture d'un flyout — voir createCategoryItem / buildCatRow.
     if (categories.length === 0) return;
 
     let editMode = false;
@@ -2314,7 +2320,7 @@ const Annotations = (() => {
 
           catWrapper.appendChild(row);
         } else {
-          const item = createCategoryItem(cat, library, catWrapper);
+          const item = createCategoryItem(cat, catWrapper);
           catWrapper.appendChild(item);
         }
       });
@@ -2354,7 +2360,8 @@ const Annotations = (() => {
     }
   }
 
-  function buildFlyoutContent(cat, library, level) {
+  function buildFlyoutContent(cat, level) {
+    const library = getLibrary();
     const hasChildren = (cat.children && cat.children.length > 0);
     const hasImages = (cat.images && cat.images.length > 0);
 
@@ -2364,7 +2371,7 @@ const Annotations = (() => {
 
     if (hasChildren) {
       cat.children.forEach(child => {
-        const subRow = buildCatRow(child, library, level + 1);
+        const subRow = buildCatRow(child, level + 1);
         flyout.appendChild(subRow);
       });
     }
@@ -2428,14 +2435,14 @@ const Annotations = (() => {
     return flyout;
   }
 
-  function buildCatRow(cat, library, level) {
+  function buildCatRow(cat, level) {
     const hasChildren = (cat.children && cat.children.length > 0);
     const hasImages = (cat.images && cat.images.length > 0);
     const hasContent = hasChildren || hasImages;
 
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--text);';
-    row.addEventListener('mouseenter', () => {
+    row.addEventListener('mouseenter', async () => {
       row.style.background = 'var(--surface2)';
       if (!hasContent) return;
       // Annuler fermetures en cours
@@ -2444,8 +2451,11 @@ const Annotations = (() => {
       });
       // Fermer les flyouts de niveaux >= level
       closeFlyoutsFrom(level);
+      // Charger la palette à la demande (1ère ouverture seulement)
+      await Store.ensureKey('eic_image_library');
+      if (!row.matches(':hover')) return; // souris déjà partie
       // Ouvrir le nouveau flyout — positionné à droite du flyout parent
-      const flyout = buildFlyoutContent(cat, library, level);
+      const flyout = buildFlyoutContent(cat, level);
       const rect = row.getBoundingClientRect();
       const parentFlyout = row.closest('.sticker-flyout');
       const parentRight = parentFlyout ? parentFlyout.getBoundingClientRect().right : rect.right;
@@ -2494,7 +2504,7 @@ const Annotations = (() => {
     return row;
   }
 
-  function createCategoryItem(cat, library, rootContainer) {
+  function createCategoryItem(cat, rootContainer) {
     const hasChildren = (cat.children && cat.children.length > 0);
     const hasImages = (cat.images && cat.images.length > 0);
     const hasContent = hasChildren || hasImages;
@@ -2503,7 +2513,7 @@ const Annotations = (() => {
 
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:var(--mono);font-size:10px;color:var(--text);';
-    row.addEventListener('mouseenter', () => {
+    row.addEventListener('mouseenter', async () => {
       row.style.background = 'var(--surface2)';
       if (!hasContent) return;
       // Annuler toutes les fermetures
@@ -2512,8 +2522,11 @@ const Annotations = (() => {
       });
       // Fermer tous les flyouts existants
       closeAllFlyouts();
+      // Charger la palette à la demande (1ère ouverture seulement)
+      await Store.ensureKey('eic_image_library');
+      if (!row.matches(':hover')) return; // souris déjà partie
       // Ouvrir le flyout de niveau 0 — toujours à droite de la sidebar
-      const flyout = buildFlyoutContent(cat, library, 0);
+      const flyout = buildFlyoutContent(cat, 0);
       const rect = row.getBoundingClientRect();
       const sidebar = document.getElementById('sidebar');
       const sidebarRight = sidebar ? sidebar.getBoundingClientRect().right : rect.right;
@@ -3018,7 +3031,8 @@ const Annotations = (() => {
   let pendingImageSrc = null;
   let pendingImageLabel = null;
 
-  function showStickerPicker(viewportPoint) {
+  async function showStickerPicker(viewportPoint) {
+    await Store.ensureKey('eic_stickers'); // clé lourde chargée à la demande
     const stickers = Store.getJSON('eic_stickers', []);
     if (stickers.length === 0) {
       alert('Aucun sticker créé. Allez dans Paramètres > Stickers.');

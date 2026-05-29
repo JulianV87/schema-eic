@@ -1590,7 +1590,16 @@ const Settings = (() => {
   function getStickers() { return Store.getJSON('eic_stickers', []); }
   function saveStickers(list) { Store.set('eic_stickers', list); }
 
-  function renderStickersSettings(container) {
+  async function renderStickersSettings(container) {
+    // Clés lourdes (images base64) chargées à la demande, pas au boot.
+    if (Store.get('eic_image_library') === null || Store.get('eic_stickers') === null) {
+      container.innerHTML = '<div style="padding:14px;color:var(--muted);font-family:var(--mono);font-size:11px;">Chargement de la bibliothèque…</div>';
+    }
+    await Store.ensureKey('eic_image_library');
+    await Store.ensureKey('eic_stickers');
+    if (activeTab !== 'stickers') return; // l'utilisateur a changé d'onglet
+    container.innerHTML = '';
+
     const wrapper = document.createElement('div');
 
     // Sous-onglets

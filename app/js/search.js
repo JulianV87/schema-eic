@@ -665,10 +665,11 @@ const Search = (() => {
     openScenarioConfigurator(sc);
   }
 
-  function openScenarioConfigurator(sc) {
+  async function openScenarioConfigurator(sc) {
     closeGareScenariosPopup();
     closeScenariosPopup();
     const annots = sc.annotations || [];
+    await Store.ensureKey('eic_stickers'); // clé lourde chargée à la demande
     const library = Store.getJSON('eic_stickers', []) || [];
     // Un "override" par sticker : { srcOverride, labelOverride }
     const overrides = new Map();
@@ -838,10 +839,11 @@ const Search = (() => {
     return { library, categories };
   }
 
-  function openStickerPickerInline(anchor, _legacy, onChoose) {
+  async function openStickerPickerInline(anchor, _legacy, onChoose) {
     const existing = document.getElementById('sticker-picker-inline');
     if (existing) existing.remove();
 
+    await Store.ensureKey('eic_image_library'); // palette chargée à la demande
     const { library, categories } = loadStickerLibrary();
     if (library.length === 0) {
       alert('Aucun sticker disponible. Va dans Paramètres > Stickers pour en créer.');
