@@ -6,6 +6,15 @@ const Settings = (() => {
 
   let activeTab = 'dessertes';
 
+  // La mise à jour du schéma (upload PDF + déclenchement de la génération)
+  // n'est disponible qu'en local : sur la version en ligne, l'onglet Schéma
+  // est retiré → aucun token ni trigger côté site public.
+  function isLocalEnv() {
+    const h = location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '' ||
+      location.protocol === 'file:' || /^192\.168\./.test(h) || /^10\./.test(h) || /\.local$/.test(h);
+  }
+
   function init() {
     // Bouton ouvrir paramètres
     const btn = document.getElementById('btn-settings');
@@ -14,6 +23,12 @@ const Settings = (() => {
     // Fermer
     const closeBtn = document.getElementById('settings-close');
     if (closeBtn) closeBtn.addEventListener('click', closeSettings);
+
+    // Onglet Schéma : local uniquement
+    if (!isLocalEnv()) {
+      const schemaTab = document.getElementById('settings-tab-schema');
+      if (schemaTab) schemaTab.remove();
+    }
 
     // Onglets paramètres
     document.querySelectorAll('.settings-tab').forEach(tab => {
@@ -97,7 +112,7 @@ const Settings = (() => {
     else if (activeTab === 'lignes') renderLignes(container);
     else if (activeTab === 'tables') renderTables(container);
     else if (activeTab === 'stickers') renderStickersSettings(container);
-    else if (activeTab === 'schema') SchemaUpdate.renderSettingsTab(container);
+    else if (activeTab === 'schema') { if (isLocalEnv()) SchemaUpdate.renderSettingsTab(container); }
 
     // Synchroniser la barre du bas
     try { Search.reloadLayout(); } catch {}
