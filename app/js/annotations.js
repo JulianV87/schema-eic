@@ -2079,6 +2079,7 @@ const Annotations = (() => {
     // Charger l'image (mise en cache)
     if (!imageCache[annotation.src]) {
       const img = new Image();
+      img.crossOrigin = 'anonymous'; // images Storage cross-origin → éviter de tainter le canvas (export)
       img.src = annotation.src;
       img.onload = () => {
         imageCache[annotation.src] = img;

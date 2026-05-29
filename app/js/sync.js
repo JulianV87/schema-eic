@@ -137,6 +137,41 @@ const Store = (() => {
   }
 
   /**
+   * Uploader une image (data URL base64) vers Supabase Storage et renvoyer
+   * son URL publique. Adressage par hash de contenu (dedup automatique).
+   * Si déjà une URL, ou en cas d'échec, renvoie l'entrée telle quelle
+   * (fallback base64) pour ne jamais perdre l'image.
+   */
+  async function uploadImage(dataUrl) {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) return dataUrl;
+    const sep = dataUrl.indexOf(';base64,');
+    if (sep < 0) return dataUrl;
+    const mime = dataUrl.slice(5, sep);
+    const ext = ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg' })[mime] || 'png';
+    let bytes;
+    try {
+      const bin = atob(dataUrl.slice(sep + 8));
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const hashBuf = await crypto.subtle.digest('SHA-256', bytes);
+      const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const objPath = 'stickers/' + hash + '.' + ext;
+      const resp = await fetch(SUPABASE_URL + '/storage/v1/object/tiles/' + objPath, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': mime, 'x-upsert': 'true' },
+        body: bytes,
+      });
+      if (resp.ok || resp.status === 409) {
+        return SUPABASE_URL + '/storage/v1/object/public/tiles/' + objPath;
+      }
+      console.error('Store: uploadImage HTTP', resp.status);
+    } catch (e) {
+      console.error('Store: uploadImage échoué —', e.message);
+    }
+    return dataUrl; // fallback : conserver la base64 plutôt que perdre l'image
+  }
+
+  /**
    * Forcer un rafraîchissement complet depuis Supabase
    */
   async function forceRefresh() {
@@ -229,7 +264,7 @@ const Store = (() => {
   // Compatibilité avec l'ancien Sync.save()
   function save(key, value) { return set(key, value); }
 
-  return { init, get, set, getJSON, save, forceRefresh, isOnline, pushAllToCloud, ensureKey };
+  return { init, get, set, getJSON, save, forceRefresh, isOnline, pushAllToCloud, ensureKey, uploadImage };
 })();
 
 // Alias pour compatibilité

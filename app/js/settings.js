@@ -1765,8 +1765,10 @@ const Settings = (() => {
         const files = Array.from(fileInput.files);
         files.forEach(file => {
           const reader = new FileReader();
-          reader.onload = (ev) => {
-            lib.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: ev.target.result });
+          reader.onload = async (ev) => {
+            // Upload vers Storage → on ne stocke qu'une URL (pas de base64 en base)
+            const url = await Store.uploadImage(ev.target.result);
+            lib.push({ name: file.name.replace(/\.[^.]+$/, ''), dataUrl: url });
             loaded++;
             if (loaded === files.length) {
               saveStickerLibrary(lib);
